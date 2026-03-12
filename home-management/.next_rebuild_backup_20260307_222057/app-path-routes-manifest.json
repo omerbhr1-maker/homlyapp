@@ -1,0 +1,9 @@
+{
+  "/api/ai/parse-recording/route": "/api/ai/parse-recording",
+  "/api/ai/recipe/route": "/api/ai/recipe",
+  "/_not-found/page": "/_not-found",
+  "/favicon.ico/route": "/favicon.ico",
+  "/icon/route": "/icon",
+  "/apple-icon/route": "/apple-icon",
+  "/page": "/"
+}

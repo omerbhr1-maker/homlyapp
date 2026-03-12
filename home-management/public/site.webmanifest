@@ -1,0 +1,29 @@
+{
+  "name": "Homly",
+  "short_name": "Homly",
+  "id": "/?v=20260308",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "/?v=20260308",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef4ff",
+  "theme_color": "#14b8a6",
+  "icons": [
+    {
+      "src": "/icon-192.png?v=20260308",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png?v=20260308",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png?v=20260308",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
