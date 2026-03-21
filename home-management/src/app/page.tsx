@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
+import { RecipeModal } from "@/components/RecipeModal";
+import { InviteModal } from "@/components/InviteModal";
+import { SettingsModal } from "@/components/SettingsModal";
 import {
   DndContext,
   DragEndEvent,
@@ -21,9 +24,8 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { appCacheStorage, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
-import { extractOutputText, type OpenAIResponsesPayload } from "@/lib/openai";
 
 type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
 
@@ -55,6 +57,7 @@ type CloudHouseRow = {
   invite_phone: string;
   house_image?: string;
   owner_user_id?: string | null;
+  updated_at?: string;
 };
 
 type CloudUserRow = {
@@ -79,6 +82,15 @@ type HouseMemberUser = {
   display_name: string;
   avatar_url: string;
   role: "owner" | "member";
+};
+
+type CachedHouseMeta = {
+  id: string;
+  name: string;
+  pin?: string;
+  invite_phone: string;
+  house_image?: string;
+  owner_user_id?: string | null;
 };
 
 type SpeechRecognitionEventLike = {
@@ -258,6 +270,46 @@ function getPublicAppOrigin() {
   return "https://home-management-hebrew.pages.dev";
 }
 
+function getAiApiUrl(path: string) {
+  if (typeof window === "undefined") return path;
+  const protocol = window.location.protocol;
+  const isNativeShell = protocol === "capacitor:" || protocol === "ionic:" || window.location.origin === "null";
+  return isNativeShell ? `${getPublicAppOrigin()}${path}` : path;
+}
+
+function sanitizeCachedImage(value?: string) {
+  const nextValue = String(value || "").trim();
+  if (!nextValue) return "";
+  if (nextValue.startsWith("data:")) return "";
+  if (nextValue.length > 2048) return "";
+  return nextValue;
+}
+
+function toCachedUser(user: CloudUserRow): CloudUserRow {
+  return {
+    ...user,
+    avatar_url: sanitizeCachedImage(user.avatar_url),
+  };
+}
+
+function toCachedHouseMeta(house: CloudHouseRow): CachedHouseMeta {
+  return {
+    id: house.id,
+    name: house.name,
+    pin: house.pin || "",
+    invite_phone: house.invite_phone || "",
+    house_image: sanitizeCachedImage(house.house_image),
+    owner_user_id: house.owner_user_id ?? null,
+  };
+}
+
+function toCachedHouseMembers(members: HouseMemberUser[]) {
+  return members.map((member) => ({
+    ...member,
+    avatar_url: sanitizeCachedImage(member.avatar_url),
+  }));
+}
+
 function formatAddedAt(value?: string) {
   if (!value) return "תאריך לא זמין";
   const date = new Date(value);
@@ -340,41 +392,78 @@ function isRecipeAnswerMissing(question: RecipeQuestion, value: RecipeAnswerValu
   return text.trim().length === 0;
 }
 
+function SafeImage({
+  src,
+  alt,
+  width,
+  height,
+  className,
+  fallback,
+}: {
+  src?: string;
+  alt: string;
+  width: number;
+  height: number;
+  className: string;
+  fallback: React.ReactNode;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
+  if (!src || hasError) {
+    return <>{fallback}</>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={width}
+      height={height}
+      className={className}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => setHasError(true)}
+    />
+  );
+}
+
 function HomeLogo({ houseName, houseImage }: { houseName?: string; houseImage?: string }) {
   return (
     <div className="flex items-center gap-3">
-      {houseImage ? (
-        <Image
-          loader={passthroughImageLoader}
-          unoptimized
-          src={houseImage}
-          alt="תמונת בית"
-          width={44}
-          height={44}
-          className="h-11 w-11 rounded-2xl border border-slate-200 object-cover shadow-lg shadow-slate-200"
-        />
-      ) : (
-        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 text-white shadow-lg shadow-teal-200">
-          <svg
-            viewBox="0 0 24 24"
-            className="h-6 w-6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.1"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
-            <path d="M9 20v-6.2" />
-            <path d="M15 20v-6.2" />
-            <path d="M9 14h6" />
-            <path d="M16.8 6.1V4.6" />
-            <path d="M18.4 3.2v2.1" />
-            <path d="M17.35 4.25h2.1" />
-          </svg>
-        </span>
-      )}
+      <SafeImage
+        src={houseImage}
+        alt="תמונת בית"
+        width={44}
+        height={44}
+        className="h-11 w-11 rounded-2xl border border-slate-200 object-cover shadow-lg shadow-slate-200"
+        fallback={
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 text-white shadow-lg shadow-teal-200">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-6 w-6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.1"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+              <path d="M9 20v-6.2" />
+              <path d="M15 20v-6.2" />
+              <path d="M9 14h6" />
+              <path d="M16.8 6.1V4.6" />
+              <path d="M18.4 3.2v2.1" />
+              <path d="M17.35 4.25h2.1" />
+            </svg>
+          </span>
+        }
+      />
       <div>
         <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{houseName || "Homly"}</h1>
         <p className="text-sm text-slate-500 sm:text-base">
@@ -485,10 +574,51 @@ const PENDING_JOIN_CODE_KEY = "homly_pending_join_code";
 const PENDING_JOIN_HOUSE_KEY = "homly_pending_join_house";
 const SELECTED_HOUSE_KEY_PREFIX = "homly_selected_house_";
 const CACHED_USER_KEY = "homly_cached_user";
-const CACHED_ACTIVE_HOUSE_KEY = "homly_cached_active_house";
+const CACHED_HOUSE_META_KEY_PREFIX = "homly_cached_house_meta_";
+const CACHED_HOUSE_MEMBERS_KEY_PREFIX = "homly_cached_house_members_";
 
 function getSelectedHouseStorageKey(userId: string) {
   return `${SELECTED_HOUSE_KEY_PREFIX}${userId}`;
+}
+
+function getCachedHouseMetaStorageKey(userId: string) {
+  return `${CACHED_HOUSE_META_KEY_PREFIX}${userId}`;
+}
+
+function getCachedHouseMembersStorageKey(houseId: string) {
+  return `${CACHED_HOUSE_MEMBERS_KEY_PREFIX}${houseId}`;
+}
+
+async function setPersistentCacheValue(key: string, value: string) {
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // Ignore cleanup failures.
+      }
+    }
+  }
+  try {
+    await appCacheStorage.setItem(key, value);
+  } catch {
+    try {
+      await appCacheStorage.removeItem(key);
+    } catch {
+      // Ignore cleanup failures.
+    }
+  }
+}
+
+async function removePersistentCacheValue(key: string) {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(key);
+  }
+  await appCacheStorage.removeItem(key);
 }
 
 function toSortableId(sectionKey: SectionKey, itemId: number) {
@@ -654,6 +784,7 @@ export default function HomePage() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isAuthResolving, setIsAuthResolving] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
   const [settingsHouseName, setSettingsHouseName] = useState("");
@@ -681,8 +812,10 @@ export default function HomePage() {
 
   const [activeUser, setActiveUser] = useState<CloudUserRow | null>(null);
   const [activeHouse, setActiveHouse] = useState<CloudHouseRow | null>(null);
+  const [cachedHouseMeta, setCachedHouseMeta] = useState<CachedHouseMeta | null>(null);
   const [memberHouses, setMemberHouses] = useState<CloudHouseRow[]>([]);
   const [houseMembers, setHouseMembers] = useState<HouseMemberUser[]>([]);
+  const [isHouseMembersLoading, setIsHouseMembersLoading] = useState(false);
 
   const [sections, setSections] = useState(initialSections);
   const [invitePhone, setInvitePhone] = useState("");
@@ -701,8 +834,6 @@ export default function HomePage() {
   const [recipeError, setRecipeError] = useState("");
   const [isRecipeLoading, setIsRecipeLoading] = useState(false);
   const [recipeRecording, setRecipeRecording] = useState(false);
-  const [openAiKey] = useState(process.env.NEXT_PUBLIC_OPENAI_API_KEY || "");
-  const [serverAiApiEnabled] = useState(process.env.NEXT_PUBLIC_ENABLE_SERVER_API === "1");
   const [dragOverlayItem, setDragOverlayItem] = useState<Item | null>(null);
 
   const [inputs, setInputs] = useState<Record<SectionKey, string>>({
@@ -718,7 +849,6 @@ export default function HomePage() {
   const recipeRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const userAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const userProfileImageInputRef = useRef<HTMLInputElement | null>(null);
-  const houseImageInputRef = useRef<HTMLInputElement | null>(null);
   const desktopSearchRef = useRef<HTMLInputElement | null>(null);
   const sectionInputRefs = useRef<Record<SectionKey, HTMLInputElement | null>>({
     homeTasks: null,
@@ -729,7 +859,14 @@ export default function HomePage() {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeAuthUserIdRef = useRef<string | null>(null);
   const initialSessionResolvedRef = useRef(false);
-  const skipNextHouseSyncRef = useRef(false);
+  const lastCloudApplyRef = useRef(0);
+  const activeHouseRef = useRef<CloudHouseRow | null>(null);
+  const activeUserRef = useRef<CloudUserRow | null>(null);
+  const housesLoadRequestRef = useRef(0);
+  const houseMembersRequestRef = useRef(0);
+  const houseSaveRequestRef = useRef(0);
+  const isHousePersistingRef = useRef(false);
+  const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: isMobile
@@ -739,22 +876,70 @@ export default function HomePage() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+
+    const restoreNativeBootstrapCache = async () => {
+      try {
+        const cachedUserRaw = await appCacheStorage.getItem(CACHED_USER_KEY);
+        if (!cachedUserRaw || cancelled) return;
+        const cachedUser = toCachedUser(JSON.parse(cachedUserRaw) as CloudUserRow);
+        setActiveUser((current) => current || cachedUser);
+        setIsAuthReady(true);
+        setIsHouseLoading(true);
+
+        const cachedHouseMetaRaw = await appCacheStorage.getItem(
+          getCachedHouseMetaStorageKey(cachedUser.id),
+        );
+        if (cachedHouseMetaRaw && !cancelled) {
+          const parsedHouseMeta = JSON.parse(cachedHouseMetaRaw) as CachedHouseMeta;
+          setCachedHouseMeta((current) => current || parsedHouseMeta);
+
+          const cachedMembersRaw = await appCacheStorage.getItem(
+            getCachedHouseMembersStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedMembersRaw && !cancelled) {
+            const parsedMembers = JSON.parse(cachedMembersRaw) as HouseMemberUser[];
+            if (Array.isArray(parsedMembers)) {
+              setHouseMembers((current) => (current.length > 0 ? current : parsedMembers));
+            }
+          }
+        }
+      } catch {
+        // Ignore native bootstrap cache errors.
+      }
+    };
+
     setHomeLink(getPublicAppOrigin());
     try {
       const cachedUserRaw = window.localStorage.getItem(CACHED_USER_KEY);
-      const cachedHouseRaw = window.localStorage.getItem(CACHED_ACTIVE_HOUSE_KEY);
-      const cachedUser = cachedUserRaw ? (JSON.parse(cachedUserRaw) as CloudUserRow) : null;
-      const cachedHouse = cachedHouseRaw ? (JSON.parse(cachedHouseRaw) as CloudHouseRow) : null;
+      const cachedUser = cachedUserRaw ? toCachedUser(JSON.parse(cachedUserRaw) as CloudUserRow) : null;
 
       if (cachedUser) {
         setActiveUser(cachedUser);
         setIsAuthReady(true);
-      }
-      if (cachedHouse) {
-        applyActiveHouse(cachedHouse);
+        setIsHouseLoading(true);
+        const cachedHouseMetaRaw = window.localStorage.getItem(
+          getCachedHouseMetaStorageKey(cachedUser.id),
+        );
+        if (cachedHouseMetaRaw) {
+          const parsedHouseMeta = JSON.parse(cachedHouseMetaRaw) as CachedHouseMeta;
+          setCachedHouseMeta(parsedHouseMeta);
+          const cachedMembersRaw = window.localStorage.getItem(
+            getCachedHouseMembersStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedMembersRaw) {
+            const parsedMembers = JSON.parse(cachedMembersRaw) as HouseMemberUser[];
+            if (Array.isArray(parsedMembers)) {
+              setHouseMembers(parsedMembers);
+            }
+          }
+        }
+      } else {
+        void restoreNativeBootstrapCache();
       }
     } catch {
       // Ignore corrupted local cache and continue with network auth bootstrap.
+      void restoreNativeBootstrapCache();
     }
     if (window.location.hash.includes("type=recovery")) {
       setIsRecoveryMode(true);
@@ -784,6 +969,7 @@ export default function HomePage() {
     media.addEventListener("change", updateDeviceMode);
 
     return () => {
+      cancelled = true;
       shouldKeepRecordingRef.current = false;
       media.removeEventListener("change", updateDeviceMode);
       recognitionRef.current?.stop();
@@ -797,14 +983,23 @@ export default function HomePage() {
     let cancelled = false;
     const userSelect = "id,username,display_name,avatar_url,auth_user_id";
     const clearAuthState = () => {
+      housesLoadRequestRef.current += 1;
+      houseMembersRequestRef.current += 1;
+      const previousAuthId = activeAuthUserIdRef.current;
       activeAuthUserIdRef.current = null;
       setActiveUser(null);
       setActiveHouse(null);
+      setCachedHouseMeta(null);
       setMemberHouses([]);
+      setHouseMembers([]);
+      setIsHouseMembersLoading(false);
+      setIsHouseLoading(false);
       autoJoinFromLinkDoneRef.current = false;
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(CACHED_USER_KEY);
-        window.localStorage.removeItem(CACHED_ACTIVE_HOUSE_KEY);
+        void removePersistentCacheValue(CACHED_USER_KEY);
+        if (previousAuthId) {
+          void removePersistentCacheValue(getCachedHouseMetaStorageKey(previousAuthId));
+        }
       }
     };
 
@@ -820,10 +1015,11 @@ export default function HomePage() {
       return (data?.[0] as CloudUserRow | undefined) || null;
     };
 
-    const getCachedUser = () => {
-      if (typeof window === "undefined") return null;
+    const getCachedUser = async () => {
       try {
-        const raw = window.localStorage.getItem(CACHED_USER_KEY);
+        const localRaw =
+          typeof window !== "undefined" ? window.localStorage.getItem(CACHED_USER_KEY) : null;
+        const raw = localRaw || (await appCacheStorage.getItem(CACHED_USER_KEY));
         if (!raw) return null;
         return JSON.parse(raw) as CloudUserRow;
       } catch {
@@ -887,36 +1083,52 @@ export default function HomePage() {
     ) => {
       if (cancelled) return;
       const shouldClear = options?.clearIfMissing ?? true;
+      setIsAuthResolving(true);
 
       if (!authUser) {
         if (shouldClear) clearAuthState();
+        setIsAuthResolving(false);
         return;
+      }
+
+      const cached = await getCachedUser();
+      const cachedMatchesAuth =
+        cached && (cached.id === authUser.id || cached.auth_user_id === authUser.id);
+
+      if (cachedMatchesAuth) {
+        activeAuthUserIdRef.current = cached.auth_user_id || cached.id;
+        setIsHouseLoading(true);
+        setActiveUser(cached);
+        void loadUserHouses(cached.id);
       }
 
       const profile = await resolveProfileFromAuth(authUser);
       if (cancelled) return;
       if (!profile) {
-        const cached = getCachedUser();
-        if (cached && (cached.id === authUser.id || cached.auth_user_id === authUser.id)) {
+        if (cachedMatchesAuth && cached) {
           activeAuthUserIdRef.current = cached.auth_user_id || cached.id;
-          setActiveUser(cached);
-          void loadUserHouses(cached.id);
+          setIsAuthResolving(false);
           return;
         }
         if (shouldClear) clearAuthState();
+        setIsAuthResolving(false);
         return;
       }
 
       activeAuthUserIdRef.current = profile.auth_user_id || profile.id;
       setActiveUser(profile);
-      // Keep the UI responsive and fetch house state in background.
-      void loadUserHouses(profile.id);
+      if (!cachedMatchesAuth || profile.id !== cached?.id) {
+        setIsHouseLoading(true);
+        // Keep the UI responsive and fetch house state in background.
+        void loadUserHouses(profile.id);
+      }
+      setIsAuthResolving(false);
     };
 
     void client.auth
       .getSession()
       .then(async ({ data }) => {
-        const hasCachedUser = Boolean(getCachedUser());
+        const hasCachedUser = Boolean(await getCachedUser());
         await applyAuthUser(data.session?.user || null, {
           clearIfMissing: !hasCachedUser,
         });
@@ -931,6 +1143,10 @@ export default function HomePage() {
     } = client.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY") {
         setIsRecoveryMode(true);
+      }
+
+      if (event === "INITIAL_SESSION") {
+        return;
       }
 
       const nextAuthId = session?.user?.id || null;
@@ -953,9 +1169,13 @@ export default function HomePage() {
         return;
       }
 
-      const clearIfMissing = event === "SIGNED_OUT" || initialSessionResolvedRef.current;
-      void applyAuthUser(session?.user || null, { clearIfMissing });
-      if (!cancelled) setIsAuthReady(true);
+      // Only clear cached auth state on an explicit sign-out.
+      // A failed token refresh should NOT log the user out.
+      const clearIfMissing = event === "SIGNED_OUT";
+      if (!cancelled) setIsAuthReady(false);
+      void applyAuthUser(session?.user || null, { clearIfMissing }).finally(() => {
+        if (!cancelled) setIsAuthReady(true);
+      });
     });
 
     return () => {
@@ -966,32 +1186,64 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep refs in sync so callbacks always see latest values.
+  useEffect(() => {
+    activeHouseRef.current = activeHouse;
+  }, [activeHouse]);
+
+  useEffect(() => {
+    activeUserRef.current = activeUser;
+  }, [activeUser]);
+
   useEffect(() => {
     const client = supabase;
     if (!activeHouse || !client) return;
-    if (skipNextHouseSyncRef.current) {
-      skipNextHouseSyncRef.current = false;
+
+    // Skip saving if this render was triggered by applying cloud data.
+    if (Date.now() - lastCloudApplyRef.current < 600) {
       return;
     }
 
     const timeout = setTimeout(async () => {
-      await client
+      const house = activeHouseRef.current;
+      const user = activeUserRef.current;
+      if (!house) return;
+
+      const requestId = ++houseSaveRequestRef.current;
+      isHousePersistingRef.current = true;
+      const { error } = await client
         .from("houses")
         .update({
-          name: activeHouse.name,
+          name: house.name,
           sections: {
             homeTasks: sections.homeTasks.items,
             generalShopping: sections.generalShopping.items,
             supermarketShopping: sections.supermarketShopping.items,
           },
           invite_phone: invitePhone,
-          house_image: activeHouse.house_image || "",
+          house_image: house.house_image || "",
         })
-        .eq("id", activeHouse.id);
+        .eq("id", house.id);
+
+      if (requestId !== houseSaveRequestRef.current) return;
+
+      isHousePersistingRef.current = false;
+      if (error) {
+        setHouseListError("שמירת השינויים נכשלה, מנסה לרענן מהענן...");
+        if (user?.id) {
+          void loadUserHouses(user.id, house.id);
+        }
+        return;
+      }
+
+      setHouseListError("");
     }, 500);
 
     return () => clearTimeout(timeout);
-  }, [sections, invitePhone, activeHouse]);
+    // activeHouse is intentionally not in deps to avoid save loops from cloud apply.
+    // The ref is used inside the callback for fresh data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, invitePhone, activeHouse?.id]);
 
   useEffect(() => {
     if (!isSettingsOpen || !activeHouse) return;
@@ -1008,6 +1260,16 @@ export default function HomePage() {
   }, [isUserProfileOpen, activeUser]);
 
   useEffect(() => {
+    if (!isRecipeModalOpen) return;
+    setRecipeText("");
+    setRecipeQuestions([]);
+    setRecipeAnswers({});
+    setRecipeItems([]);
+    setRecipeNotes("");
+    setRecipeError("");
+  }, [isRecipeModalOpen]);
+
+  useEffect(() => {
     setInviteToken("");
     setInviteFeedback("");
   }, [activeHouse?.id]);
@@ -1017,93 +1279,49 @@ export default function HomePage() {
   }, [activeUser?.auth_user_id, activeUser?.id]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !isAuthReady) return;
     try {
       if (activeUser) {
-        window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(activeUser));
+        void setPersistentCacheValue(CACHED_USER_KEY, JSON.stringify(toCachedUser(activeUser)));
       } else {
-        window.localStorage.removeItem(CACHED_USER_KEY);
+        void removePersistentCacheValue(CACHED_USER_KEY);
       }
     } catch {
       // Ignore local storage errors.
     }
-  }, [activeUser]);
+  }, [activeUser, isAuthReady]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !isAuthReady || !activeUser?.id) return;
     try {
       if (activeHouse) {
-        window.localStorage.setItem(CACHED_ACTIVE_HOUSE_KEY, JSON.stringify(activeHouse));
-      } else {
-        window.localStorage.removeItem(CACHED_ACTIVE_HOUSE_KEY);
+        const meta = toCachedHouseMeta(activeHouse);
+        setCachedHouseMeta(meta);
+        void setPersistentCacheValue(getCachedHouseMetaStorageKey(activeUser.id), JSON.stringify(meta));
       }
     } catch {
       // Ignore local storage errors.
     }
-  }, [activeHouse]);
+  }, [activeUser?.id, activeHouse, isAuthReady]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !activeUser?.id) return;
+    if (typeof window === "undefined" || !isAuthReady || !activeUser?.id) return;
     const key = getSelectedHouseStorageKey(activeUser.id);
     if (activeHouse?.id) {
-      window.localStorage.setItem(key, activeHouse.id);
-    } else {
-      window.localStorage.removeItem(key);
+      void setPersistentCacheValue(key, activeHouse.id);
+    } else if (!isHouseLoading) {
+      void removePersistentCacheValue(key);
     }
-  }, [activeUser?.id, activeHouse?.id]);
+  }, [activeUser?.id, activeHouse?.id, isAuthReady, isHouseLoading]);
 
   useEffect(() => {
     if (!activeHouse?.id) {
+      houseMembersRequestRef.current += 1;
       setHouseMembers([]);
+      setIsHouseMembersLoading(false);
       return;
     }
-    const run = async () => {
-      const client = supabase;
-      if (!client) return;
-
-      const { data: memberships, error: membershipError } = await client
-        .from("house_members")
-        .select("user_id,role")
-        .eq("house_id", activeHouse.id);
-
-      if (membershipError || !memberships) {
-        setHouseMembers([]);
-        return;
-      }
-
-      const userIds = memberships.map((member) => member.user_id);
-      if (userIds.length === 0) {
-        setHouseMembers([]);
-        return;
-      }
-
-      const { data: users, error: usersError } = await client
-        .from("app_users")
-        .select("id,display_name,avatar_url")
-        .in("id", userIds);
-
-      if (usersError || !users) {
-        setHouseMembers([]);
-        return;
-      }
-
-      const members = memberships
-        .map((member) => {
-          const user = users.find((entry) => entry.id === member.user_id);
-          if (!user) return null;
-          return {
-            id: user.id as string,
-            display_name: String(user.display_name || "משתמש"),
-            avatar_url: String(user.avatar_url || ""),
-            role: (member.role as "owner" | "member") || "member",
-          };
-        })
-        .filter((member): member is HouseMemberUser => Boolean(member));
-
-      setHouseMembers(members);
-    };
-
-    void run();
+    void loadHouseMembers(activeHouse.id);
   }, [activeHouse?.id]);
 
   useEffect(() => {
@@ -1116,12 +1334,14 @@ export default function HomePage() {
 
     const startFallbackSync = () => {
       if (fallbackInterval) return;
-      if (activeUser?.id) {
-        void loadUserHouses(activeUser.id, houseId);
+      const userId = activeUserRef.current?.id;
+      if (userId) {
+        void loadUserHouses(userId, houseId);
       }
       fallbackInterval = setInterval(() => {
-        if (activeUser?.id) {
-          void loadUserHouses(activeUser.id, houseId);
+        const uid = activeUserRef.current?.id;
+        if (uid) {
+          void loadUserHouses(uid, houseId);
         }
       }, 5000);
     };
@@ -1146,20 +1366,32 @@ export default function HomePage() {
         (payload) => {
           const next = payload.new as Partial<CloudHouseRow> | null;
           if (!next?.id) return;
+          // Use refs for fresh values — the closure would otherwise see stale data.
+          const currentHouse = activeHouseRef.current;
           const syncedHouse: CloudHouseRow = {
             id: String(next.id),
-            name: String(next.name || activeHouse.name),
-            pin: String(next.pin || ""),
+            name: String(next.name || currentHouse?.name || ""),
+            pin: String(next.pin || currentHouse?.pin || ""),
             sections: normalizeCloudSections(
-              (next.sections as Record<SectionKey, Item[]> | undefined) || activeHouse.sections,
+              (next.sections as Record<SectionKey, Item[]> | undefined) || currentHouse?.sections || null,
             ),
-            invite_phone: String(next.invite_phone || ""),
-            house_image: typeof next.house_image === "string" ? next.house_image : "",
+            invite_phone: String(next.invite_phone || currentHouse?.invite_phone || ""),
+            house_image:
+              typeof next.house_image === "string"
+                ? next.house_image
+                : (currentHouse?.house_image || ""),
             owner_user_id:
               typeof next.owner_user_id === "string"
                 ? next.owner_user_id
-                : (activeHouse.owner_user_id ?? null),
+                : (currentHouse?.owner_user_id ?? null),
+            updated_at: typeof next.updated_at === "string" ? next.updated_at : currentHouse?.updated_at,
           };
+          if (isHousePersistingRef.current && currentHouse?.id === syncedHouse.id) {
+            setMemberHouses((prev) =>
+              prev.map((house) => (house.id === syncedHouse.id ? { ...house, ...syncedHouse } : house)),
+            );
+            return;
+          }
           applyActiveHouse(syncedHouse);
           setMemberHouses((prev) =>
             prev.map((house) => (house.id === syncedHouse.id ? syncedHouse : house)),
@@ -1175,8 +1407,9 @@ export default function HomePage() {
           filter: `house_id=eq.${houseId}`,
         },
         () => {
-          if (activeUser?.id) {
-            void loadUserHouses(activeUser.id, houseId);
+          const userId = activeUserRef.current?.id;
+          if (userId) {
+            void loadUserHouses(userId, houseId);
           }
         },
       )
@@ -1210,6 +1443,37 @@ export default function HomePage() {
     // applyActiveHouse and loadUserHouses are intentionally captured for live sync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeHouse?.id, activeUser?.id]);
+
+  // Re-sync data and verify session when the app returns from background.
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+
+      // Verify the session is still valid.
+      void client.auth.getSession().then(({ data }) => {
+        if (!data.session && activeUserRef.current) {
+          // Token expired while app was in background — try a silent refresh.
+          void client.auth.refreshSession();
+        }
+      });
+
+      // Refresh house data from the cloud.
+      const userId = activeUserRef.current?.id;
+      const houseId = activeHouseRef.current?.id;
+      if (userId) {
+        void loadUserHouses(userId, houseId);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setInviteToken("");
@@ -1268,80 +1532,11 @@ export default function HomePage() {
   }, []);
 
   const parseRecordingWithAI = async (sectionKey: SectionKey, text: string) => {
-    const parseRecordingDirect = async () => {
-      if (!openAiKey.trim()) return sanitizeItems(splitTranscriptToItems(text));
-
-      try {
-        const sectionName = initialSections[sectionKey].title;
-        const prompt = [
-          "אתה מנתח תמלול דיבור בעברית לרשימת פריטים מדויקת.",
-          `סוג הרשימה: ${sectionName}.`,
-          "כללים:",
-          "- אל תייצר פריטים שלא נאמרו.",
-          "- שמור ביטויים רב-מילתיים כפריט אחד.",
-          "- הסר רעשי דיבור ומילות מילוי.",
-          "- החזר רק JSON לפי הסכימה.",
-          "",
-          `תמלול: ${text}`,
-        ].join("\n");
-
-        const response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openAiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4.1",
-            input: prompt,
-            text: {
-              format: {
-                type: "json_schema",
-                name: "recording_item_parser_client",
-                strict: true,
-                schema: {
-                  type: "object",
-                  properties: {
-                    items: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          name: { type: "string" },
-                        },
-                        required: ["name"],
-                        additionalProperties: false,
-                      },
-                    },
-                  },
-                  required: ["items"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          }),
-        });
-
-        if (!response.ok) return sanitizeItems(splitTranscriptToItems(text));
-        const data = (await response.json()) as OpenAIResponsesPayload;
-        const parsedText = extractOutputText(data);
-        const parsed = JSON.parse(parsedText || "{\"items\":[]}") as {
-          items?: Array<{ name?: string }>;
-        };
-
-        const items = sanitizeItems(
-          Array.isArray(parsed.items) ? parsed.items.map((item) => String(item.name || "")) : [],
-        );
-        return items.length > 0 ? items : sanitizeItems(splitTranscriptToItems(text));
-      } catch {
-        return sanitizeItems(splitTranscriptToItems(text));
-      }
-    };
-
-    if (!serverAiApiEnabled) return parseRecordingDirect();
+    const fallbackItems = () => sanitizeItems(splitTranscriptToItems(text));
 
     try {
-      const response = await fetch("/api/ai/parse-recording", {
+      // Native iOS bundles don't contain Next API routes locally, so they call the deployed origin.
+      const response = await fetch(getAiApiUrl("/api/ai/parse-recording"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1352,16 +1547,16 @@ export default function HomePage() {
         }),
       });
 
-      if (!response.ok) return parseRecordingDirect();
+      if (!response.ok) return fallbackItems();
 
       const data = (await response.json()) as { items?: string[] };
       if (!Array.isArray(data.items) || data.items.length === 0) {
-        return parseRecordingDirect();
+        return fallbackItems();
       }
 
       return sanitizeItems(data.items);
     } catch {
-      return parseRecordingDirect();
+      return fallbackItems();
     }
   };
 
@@ -1662,49 +1857,83 @@ export default function HomePage() {
     setDragOverlayItem(null);
   };
 
-  const handleSettingsImageFile = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === "string" ? reader.result : "";
-      setSettingsHouseImage(value);
-    };
-    reader.readAsDataURL(file);
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(typeof reader.result === "string" ? reader.result : "");
+      };
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(file);
+    });
+
+  const optimizeImageFile = async (file: File, maxSize: number, quality: number) => {
+    const fallback = await readFileAsDataUrl(file);
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const image = new window.Image();
+      const loaded = new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("image-load-failed"));
+      });
+      image.src = objectUrl;
+      await loaded;
+
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      if (!width || !height) {
+        URL.revokeObjectURL(objectUrl);
+        return fallback;
+      }
+
+      const scale = Math.min(1, maxSize / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        URL.revokeObjectURL(objectUrl);
+        return fallback;
+      }
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(objectUrl);
+
+      const optimized = canvas.toDataURL("image/jpeg", quality);
+      return optimized || fallback;
+    } catch {
+      return fallback;
+    }
   };
 
-  const handleUserAvatarFile = (file?: File) => {
+  const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === "string" ? reader.result : "";
-      setUserAvatarInput(value);
-    };
-    reader.readAsDataURL(file);
+    const value = await optimizeImageFile(file, 1280, 0.8);
+    if (value) setSettingsHouseImage(value);
+  };
+
+  const handleUserAvatarFile = async (file?: File) => {
+    if (!file) return;
+    const value = await optimizeImageFile(file, 640, 0.82);
+    if (value) setUserAvatarInput(value);
   };
 
   const openUserAvatarPicker = () => {
     userAvatarInputRef.current?.click();
   };
 
-  const handleUserProfileImageFile = (file?: File) => {
+  const handleUserProfileImageFile = async (file?: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === "string" ? reader.result : "";
-      setUserProfileImage(value);
-    };
-    reader.readAsDataURL(file);
+    const value = await optimizeImageFile(file, 640, 0.82);
+    if (value) setUserProfileImage(value);
   };
 
   const openUserProfileImagePicker = () => {
     userProfileImageInputRef.current?.click();
   };
 
-  const openHouseImagePicker = () => {
-    houseImageInputRef.current?.click();
-  };
-
-  const saveUserProfileSettings = async () => {
+const saveUserProfileSettings = async () => {
     const client = supabase;
     if (!client || !activeUser) return;
 
@@ -1975,107 +2204,8 @@ export default function HomePage() {
       return true;
     };
 
-    const runRecipeDirect = async () => {
-      if (!openAiKey.trim()) return false;
-
-      const prompt = [
-        "אתה שף ועוזר קניות ישראלי.",
-        "עליך להפיק רשימת רכיבי קנייה מדויקת לפי מתכון בעברית.",
-        "כללים קשיחים:",
-        "1) החזר רק JSON לפי הסכימה.",
-        "2) אסור להחזיר מנות מוכנות, רק רכיבים שניתן לקנות.",
-        "3) אל תוסיף רכיבים לא קשורים.",
-        "4) אם חסר מידע מהותי, החזר needs_clarification=true ו-items=[].",
-        "5) שאל עד 4 שאלות קצרות וממוקדות בלבד.",
-        "6) לכל שאלה הגדר kind: single | multi | text.",
-        "7) kind=multi מיועד למקרים עם כמה בחירות.",
-        "8) notes מיועד לסיכום קצר בלבד, לא לשאלות.",
-        "9) אם יש מספיק מידע: needs_clarification=false ו-questions=[].",
-        "10) שמור כמויות כשיש בטקסט; כשאין, השאר amount ריק.",
-        "",
-        `מתכון: ${recipeText}`,
-        `תשובות משתמש: ${JSON.stringify(recipeAnswers)}`,
-      ].join("\n");
-
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openAiKey.trim()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4.1",
-          input: prompt,
-          text: {
-            format: {
-              type: "json_schema",
-              name: "recipe_assistant_client",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  needs_clarification: { type: "boolean" },
-                  notes: { type: "string" },
-                  questions: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        id: { type: "string" },
-                        title: { type: "string" },
-                        kind: { type: "string", enum: ["single", "multi", "text"] },
-                        options: { type: "array", items: { type: "string" } },
-                      },
-                      required: ["id", "title", "kind", "options"],
-                      additionalProperties: false,
-                    },
-                  },
-                  items: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        name: { type: "string" },
-                        amount: { type: "string" },
-                      },
-                      required: ["name", "amount"],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-                required: ["needs_clarification", "questions", "items", "notes"],
-                additionalProperties: false,
-              },
-            },
-          },
-        }),
-      });
-
-      if (!response.ok) return false;
-      const data = (await response.json()) as OpenAIResponsesPayload;
-      const parsedText = extractOutputText(data);
-      const parsed = JSON.parse(parsedText || "{}") as RecipeAiResponse;
-      return applyParsedRecipeResult({ ...parsed, source: "ai" });
-    };
-
-    if (!serverAiApiEnabled) {
-      try {
-        const successFromClient = await runRecipeDirect();
-        if (!successFromClient) {
-          runRecipeFallback();
-          setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
-        }
-      } catch {
-        runRecipeFallback();
-        setRecipeError("ניתוח ענן נכשל, עברתי למצב חכם חלופי.");
-      } finally {
-        setIsRecipeLoading(false);
-      }
-      return;
-    }
-
     try {
-      const response = await fetch("/api/ai/recipe", {
+      const response = await fetch(getAiApiUrl("/api/ai/recipe"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2087,35 +2217,21 @@ export default function HomePage() {
       });
 
       if (!response.ok) {
-        const successFromClient = await runRecipeDirect();
-        if (!successFromClient) {
-          runRecipeFallback();
-          setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
-        }
+        runRecipeFallback();
+        setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
         return;
       }
 
       const parsed = (await response.json()) as RecipeAiResponse;
       const successFromApi = applyParsedRecipeResult(parsed);
       if (!successFromApi) {
-        const successFromClient = await runRecipeDirect();
-        if (!successFromClient) {
-          runRecipeFallback();
-          setRecipeError("לא התקבלו רכיבים מספקים, עברתי למצב חלופי.");
-        }
+        runRecipeFallback();
+        setRecipeError("לא התקבלו רכיבים מספקים, עברתי למצב חלופי.");
         return;
       }
     } catch {
-      try {
-        const successFromClient = await runRecipeDirect();
-        if (!successFromClient) {
-          runRecipeFallback();
-          setRecipeError("ניתוח ענן נכשל, עברתי למצב חכם חלופי.");
-        }
-      } catch {
-        runRecipeFallback();
-        setRecipeError("ניתוח ענן נכשל, עברתי למצב חכם חלופי.");
-      }
+      runRecipeFallback();
+      setRecipeError("ניתוח ענן נכשל, עברתי למצב חכם חלופי.");
     } finally {
       setIsRecipeLoading(false);
     }
@@ -2133,7 +2249,8 @@ export default function HomePage() {
   const applyActiveHouse = (house: CloudHouseRow) => {
     const normalizedSections = normalizeCloudSections(house.sections);
     const normalizedHouse = { ...house, sections: normalizedSections };
-    skipNextHouseSyncRef.current = true;
+    // Mark timestamp so the save effect skips saving data that just came from the cloud.
+    lastCloudApplyRef.current = Date.now();
     setActiveHouse(normalizedHouse);
     setSections({
       homeTasks: { ...initialSections.homeTasks, items: normalizedSections.homeTasks },
@@ -2149,42 +2266,150 @@ export default function HomePage() {
     setInvitePhone(house.invite_phone || "");
   };
 
+  const loadHouseMembers = async (
+    houseId: string,
+    seedMemberships?: Array<{ house_id?: string; user_id: string; role?: string | null }>,
+  ) => {
+    const client = supabase;
+    if (!client) return;
+
+    const requestId = ++houseMembersRequestRef.current;
+    const shouldShowLoading = !(activeHouse?.id === houseId && houseMembers.length > 0);
+    setIsHouseMembersLoading(shouldShowLoading);
+    const loadingGuard = setTimeout(() => {
+      if (requestId === houseMembersRequestRef.current) {
+        setIsHouseMembersLoading(false);
+      }
+    }, 3500);
+    const cacheKey = getCachedHouseMembersStorageKey(houseId);
+    try {
+      const localRaw =
+        typeof window !== "undefined" ? window.localStorage.getItem(cacheKey) : null;
+      const nativeRaw = localRaw || (await appCacheStorage.getItem(cacheKey));
+      if (nativeRaw) {
+        const cachedMembers = toCachedHouseMembers(JSON.parse(nativeRaw) as HouseMemberUser[]);
+        if (Array.isArray(cachedMembers) && cachedMembers.length > 0) {
+          setHouseMembers(cachedMembers);
+          setIsHouseMembersLoading(false);
+        }
+      }
+    } catch {
+      // Ignore malformed cached house members.
+    }
+    const membershipsForHouse = seedMemberships
+      ? seedMemberships.filter((member) => member.house_id === houseId)
+      : null;
+
+    const membershipsResult = membershipsForHouse
+      ? { data: membershipsForHouse, error: null }
+      : await client
+          .from("house_members")
+          .select("house_id,user_id,role")
+          .eq("house_id", houseId);
+
+    if (requestId !== houseMembersRequestRef.current) {
+      clearTimeout(loadingGuard);
+      return;
+    }
+
+    const memberships = membershipsResult.data;
+    if (membershipsResult.error || !memberships) {
+      clearTimeout(loadingGuard);
+      setIsHouseMembersLoading(false);
+      return;
+    }
+
+    const userIds = Array.from(new Set(memberships.map((member) => member.user_id)));
+    if (userIds.length === 0) {
+      setHouseMembers([]);
+      void setPersistentCacheValue(cacheKey, JSON.stringify([]));
+      clearTimeout(loadingGuard);
+      setIsHouseMembersLoading(false);
+      return;
+    }
+
+    const { data: users, error: usersError } = await client
+      .from("app_users")
+      .select("id,display_name,avatar_url")
+      .in("id", userIds);
+
+    if (requestId !== houseMembersRequestRef.current) {
+      clearTimeout(loadingGuard);
+      return;
+    }
+
+    if (usersError || !users) {
+      clearTimeout(loadingGuard);
+      setIsHouseMembersLoading(false);
+      return;
+    }
+
+    const members = memberships
+      .map((member) => {
+        const user = users.find((entry) => entry.id === member.user_id);
+        if (!user) return null;
+        return {
+          id: user.id as string,
+          display_name: String(user.display_name || "משתמש"),
+          avatar_url: String(user.avatar_url || ""),
+          role: (member.role as "owner" | "member") || "member",
+        };
+      })
+      .filter((member): member is HouseMemberUser => Boolean(member));
+
+    const cachedMembers = toCachedHouseMembers(members);
+    setHouseMembers(cachedMembers);
+    void setPersistentCacheValue(cacheKey, JSON.stringify(cachedMembers));
+    clearTimeout(loadingGuard);
+    setIsHouseMembersLoading(false);
+  };
+
   const loadUserHouses = async (userId: string, preferredHouseId?: string) => {
     const client = supabase;
     if (!client) return;
+    const requestId = ++housesLoadRequestRef.current;
+    setIsHouseLoading(true);
 
     const { data: membershipData, error: membershipError } = await client
       .from("house_members")
       .select("house_id,user_id,role")
       .eq("user_id", userId);
 
+    if (requestId !== housesLoadRequestRef.current) return;
+
     if (membershipError || !membershipData || membershipData.length === 0) {
       setMemberHouses([]);
       setActiveHouse(null);
+      setHouseMembers([]);
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(getSelectedHouseStorageKey(userId));
+        void removePersistentCacheValue(getSelectedHouseStorageKey(userId));
       }
+      setIsHouseLoading(false);
       return;
     }
 
     const houseIds = Array.from(new Set(membershipData.map((member) => member.house_id)));
     const { data: housesData, error: housesError } = await client
       .from("houses")
-      .select("id,name,pin,sections,invite_phone,house_image,owner_user_id")
+      .select("id,name,pin,sections,invite_phone,house_image,owner_user_id,updated_at")
       .in("id", houseIds)
       .order("updated_at", { ascending: false });
 
+    if (requestId !== housesLoadRequestRef.current) return;
+
     if (housesError || !housesData) {
       setHouseListError("לא הצלחתי לטעון את הבתים שלך.");
+      setIsHouseLoading(false);
       return;
     }
 
     const houses = housesData as CloudHouseRow[];
     setMemberHouses(houses);
+    const selectedHouseKey = getSelectedHouseStorageKey(userId);
     const selectedHouseFromStorage =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem(getSelectedHouseStorageKey(userId)) || undefined
-        : undefined;
+      (typeof window !== "undefined"
+        ? window.localStorage.getItem(selectedHouseKey) || undefined
+        : undefined) || (await appCacheStorage.getItem(selectedHouseKey)) || undefined;
     const preferredHouse = preferredHouseId || selectedHouseFromStorage;
 
     const nextHouse =
@@ -2193,10 +2418,16 @@ export default function HomePage() {
       houses[0];
 
     if (nextHouse) {
+      if (isHousePersistingRef.current && activeHouse?.id === nextHouse.id) {
+        setIsHouseLoading(false);
+        return;
+      }
       applyActiveHouse(nextHouse);
+      void loadHouseMembers(nextHouse.id, membershipData as Array<{ house_id?: string; user_id: string; role?: string | null }>);
     } else {
       setActiveHouse(null);
     }
+    setIsHouseLoading(false);
   };
 
   const handleCreateUser = async () => {
@@ -2328,6 +2559,7 @@ export default function HomePage() {
     }
 
     setActiveUser(nextUser);
+    setIsHouseLoading(true);
     setAuthLoading(false);
     setAuthError("");
     setEmailInput("");
@@ -2404,6 +2636,7 @@ export default function HomePage() {
     }
 
     setActiveUser(user);
+    setIsHouseLoading(true);
     setAuthLoading(false);
     setUserPasswordInput("");
     await loadUserHouses(user.id);
@@ -2820,7 +3053,7 @@ export default function HomePage() {
     );
   }
 
-  if (!isAuthReady && !activeUser) {
+  if ((!isAuthReady || isAuthResolving) && !activeUser) {
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
         <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
@@ -3057,25 +3290,58 @@ export default function HomePage() {
   }
 
   if (!activeHouse) {
+    if (isHouseLoading) {
+      return (
+        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
+          <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+            <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
+            <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
+            <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
+            {houseMembers.length > 0 && (
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {houseMembers.slice(0, 4).map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  >
+                    <SafeImage
+                      src={member.avatar_url}
+                      alt={member.display_name}
+                      width={28}
+                      height={28}
+                      className="h-7 w-7 rounded-xl object-cover"
+                      fallback={
+                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                          {member.display_name.slice(0, 1)}
+                        </span>
+                      }
+                    />
+                    <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
+      );
+    }
+
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-2xl items-center px-4 py-8">
         <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-5 shadow-xl shadow-slate-200/70 sm:p-7">
           <div className="flex items-center gap-3">
-            {activeUser.avatar_url ? (
-              <Image
-                loader={passthroughImageLoader}
-                unoptimized
-                src={activeUser.avatar_url}
-                alt="תמונת משתמש"
-                width={52}
-                height={52}
-                className="h-13 w-13 rounded-2xl border border-slate-200 object-cover"
-              />
-            ) : (
-              <span className="flex h-13 w-13 items-center justify-center rounded-2xl bg-teal-100 text-lg font-bold text-teal-700">
-                {activeUser.display_name.slice(0, 1)}
-              </span>
-            )}
+            <SafeImage
+              src={activeUser.avatar_url}
+              alt="תמונת משתמש"
+              width={52}
+              height={52}
+              className="h-13 w-13 rounded-2xl border border-slate-200 object-cover"
+              fallback={
+                <span className="flex h-13 w-13 items-center justify-center rounded-2xl bg-teal-100 text-lg font-bold text-teal-700">
+                  {activeUser.display_name.slice(0, 1)}
+                </span>
+              }
+            />
             <div>
               <h2 className="text-lg font-bold text-slate-900">{activeUser.display_name}</h2>
               <p className="text-xs font-bold text-slate-500">@{activeUser.username}</p>
@@ -3160,21 +3426,18 @@ export default function HomePage() {
               onClick={() => setIsUserProfileOpen(true)}
               className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-1 lg:flex"
             >
-              {activeUser.avatar_url ? (
-                <Image
-                  loader={passthroughImageLoader}
-                  unoptimized
-                  src={activeUser.avatar_url}
-                  alt="תמונת משתמש"
-                  width={28}
-                  height={28}
-                  className="h-7 w-7 rounded-xl object-cover"
-                />
-              ) : (
-                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                  {activeUser.display_name.slice(0, 1)}
-                </span>
-              )}
+              <SafeImage
+                src={activeUser.avatar_url}
+                alt="תמונת משתמש"
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded-xl object-cover"
+                fallback={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                    {activeUser.display_name.slice(0, 1)}
+                  </span>
+                }
+              />
               <span className="text-xs font-bold text-slate-700">{activeUser.display_name}</span>
             </button>
             <button
@@ -3206,7 +3469,9 @@ export default function HomePage() {
           <p className="text-xs font-bold text-slate-500">אנשים בבית</p>
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
-              {houseMembers.length} משתמשים
+              {isHouseMembersLoading && houseMembers.length === 0
+                ? "טוען אנשים..."
+                : `${houseMembers.length} משתמשים`}
             </span>
             <button
               type="button"
@@ -3237,26 +3502,28 @@ export default function HomePage() {
           </div>
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
+          {isHouseMembersLoading && houseMembers.length === 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+              טוען את אנשי הבית...
+            </div>
+          )}
           {houseMembers.map((member) => (
             <div
               key={member.id}
               className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-2 py-1.5"
             >
-              {member.avatar_url ? (
-                <Image
-                  loader={passthroughImageLoader}
-                  unoptimized
-                  src={member.avatar_url}
-                  alt={member.display_name}
-                  width={28}
-                  height={28}
-                  className="h-7 w-7 rounded-xl object-cover"
-                />
-              ) : (
-                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                  {member.display_name.slice(0, 1)}
-                </span>
-              )}
+              <SafeImage
+                src={member.avatar_url}
+                alt={member.display_name}
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded-xl object-cover"
+                fallback={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                    {member.display_name.slice(0, 1)}
+                  </span>
+                }
+              />
               <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
               {member.role === "owner" && (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
@@ -3487,284 +3754,49 @@ export default function HomePage() {
         </DndContext>
 
           {isRecipeModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-2 sm:items-center sm:p-3">
-              <div className="max-h-[88dvh] w-full max-w-[min(100vw-0.75rem,36rem)] overflow-y-auto rounded-3xl border border-white/70 bg-white p-4 shadow-2xl sm:p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900">מתכון חכם לסופר</h3>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsRecipeModalOpen(false);
-                      setRecipeRecording(false);
-                      recipeRecognitionRef.current?.stop();
-                    }}
-                    className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
-                  >
-                    סגור
-                  </button>
-                </div>
-
-                <div className="flex gap-2">
-                  <textarea
-                    value={recipeText}
-                    onChange={(event) => setRecipeText(event.target.value)}
-                    placeholder="כתוב או הדבק מתכון מלא..."
-                    className="min-h-24 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={toggleRecipeRecording}
-                    className={`mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${recipeRecording ? "border-rose-300 bg-rose-500 text-white shadow-lg shadow-rose-200" : "border-slate-200 bg-white text-slate-700"} transition`}
-                    title={recipeRecording ? "עצור הקלטה" : "הקלטת מתכון"}
-                  >
-                    <MicIcon />
-                  </button>
-                </div>
-
-                {recipeQuestions.length > 0 && (
-                  <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-bold text-slate-500">
-                      ענה על כל השאלות ולחץ ״המשך ניתוח״.
-                    </p>
-                    {recipeQuestions.map((question) => (
-                      <div key={question.id} className="block">
-                        <span className="mb-1 block text-xs font-bold text-slate-700">
-                          {question.title}
-                        </span>
-                        {getRecipeQuestionKind(question) === "multi" && question.options && question.options.length > 0 ? (
-                          <>
-                            <div className="grid grid-cols-2 gap-2">
-                              {question.options.map((option) => {
-                                const selectedValues = getRecipeAnswerValues(recipeAnswers[question.id]);
-                                const selected = selectedValues.includes(option);
-                                const reachedLimit =
-                                  Boolean(question.maxSelections) &&
-                                  selectedValues.length >= Number(question.maxSelections);
-                                return (
-                                  <button
-                                    key={`${question.id}-${option}`}
-                                    type="button"
-                                    onClick={() =>
-                                      {
-                                        setRecipeError("");
-                                        setRecipeAnswers((prev) => {
-                                          const values = getRecipeAnswerValues(prev[question.id]);
-                                          const isSelected = values.includes(option);
-                                          if (isSelected) {
-                                            return {
-                                              ...prev,
-                                              [question.id]: values.filter((value) => value !== option),
-                                            };
-                                          }
-                                          if (question.maxSelections && values.length >= question.maxSelections) {
-                                            return prev;
-                                          }
-                                          return {
-                                            ...prev,
-                                            [question.id]: [...values, option],
-                                          };
-                                        });
-                                      }
-                                    }
-                                    disabled={!selected && reachedLimit}
-                                    className={`min-h-10 rounded-xl border px-2 text-xs font-bold transition ${
-                                      selected
-                                        ? "border-teal-300 bg-teal-50 text-teal-700"
-                                        : "border-slate-200 bg-white text-slate-700"
-                                    } disabled:opacity-50`}
-                                  >
-                                    {option}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <p className="mt-1 text-[11px] font-bold text-slate-400">
-                              אפשר לבחור עד {question.maxSelections || question.options.length} אפשרויות
-                            </p>
-                          </>
-                        ) : getRecipeQuestionKind(question) === "single" && question.options && question.options.length > 0 ? (
-                          <select
-                            value={
-                              Array.isArray(recipeAnswers[question.id])
-                                ? getRecipeAnswerValues(recipeAnswers[question.id])[0] || ""
-                                : String(recipeAnswers[question.id] || "")
-                            }
-                            onChange={(event) =>
-                              {
-                                setRecipeError("");
-                                setRecipeAnswers((prev) => ({
-                                  ...prev,
-                                  [question.id]: event.target.value,
-                                }));
-                              }
-                            }
-                            className="min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                          >
-                            <option value="">בחר...</option>
-                            {question.options.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            value={recipeAnswers[question.id] || ""}
-                            onChange={(event) =>
-                              {
-                                setRecipeError("");
-                                setRecipeAnswers((prev) => ({
-                                  ...prev,
-                                  [question.id]: event.target.value,
-                                }));
-                              }
-                            }
-                            className="min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                            placeholder="הקלד תשובה"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={runRecipeAi}
-                    disabled={
-                      isRecipeLoading ||
-                      (recipeQuestions.length > 0 &&
-                        recipeQuestions.some((question) =>
-                          isRecipeAnswerMissing(question, recipeAnswers[question.id]),
-                        ))
-                    }
-                    className="min-h-11 flex-1 rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 px-4 text-sm font-bold text-white disabled:opacity-50"
-                  >
-                    {isRecipeLoading ? "מנתח..." : recipeQuestions.length > 0 ? "המשך ניתוח" : "נתח מתכון"}
-                  </button>
-                </div>
-
-                {recipeNotes && recipeQuestions.length === 0 && (
-                  <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
-                    {recipeNotes}
-                  </p>
-                )}
-                {recipeError && (
-                  <p className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
-                    {recipeError}
-                  </p>
-                )}
-
-                {recipeItems.length > 0 && (
-                  <div className="mt-3 rounded-2xl border border-teal-200 bg-teal-50 p-3">
-                    <p className="text-xs font-bold text-teal-800">רשימת קניות מוכנה:</p>
-                    <ul className="mt-2 max-h-44 space-y-1 overflow-auto text-sm text-slate-700">
-                      {recipeItems.map((item) => (
-                        <li key={item}>• {item}</li>
-                      ))}
-                    </ul>
-                    <button
-                      type="button"
-                      onClick={addRecipeItemsToSupermarket}
-                      className="mt-3 min-h-10 w-full rounded-xl bg-slate-900 px-4 text-xs font-bold text-white transition hover:bg-slate-800"
-                    >
-                      הוסף הכול לרשימת הסופר
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            <RecipeModal
+              recipeText={recipeText}
+              onRecipeTextChange={setRecipeText}
+              recipeQuestions={recipeQuestions}
+              recipeAnswers={recipeAnswers}
+              onRecipeAnswerChange={(questionId, value) => {
+                setRecipeError("");
+                setRecipeAnswers((prev) => ({ ...prev, [questionId]: value }));
+              }}
+              recipeItems={recipeItems}
+              recipeNotes={recipeNotes}
+              recipeError={recipeError}
+              isRecipeLoading={isRecipeLoading}
+              recipeRecording={recipeRecording}
+              onToggleRecording={toggleRecipeRecording}
+              onRunRecipe={() => void runRecipeAi()}
+              onAddToSupermarket={addRecipeItemsToSupermarket}
+              onClose={() => {
+                setIsRecipeModalOpen(false);
+                setRecipeRecording(false);
+                recipeRecognitionRef.current?.stop();
+              }}
+            />
           )}
 
           {isInviteModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-2 sm:items-center sm:p-3">
-              <div className="w-full max-w-[min(100vw-0.75rem,30rem)] rounded-3xl border border-white/80 bg-white p-4 shadow-2xl sm:p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900">שיתוף והזמנה לבית</h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsInviteModalOpen(false)}
-                    className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
-                  >
-                    סגור
-                  </button>
-                </div>
-
-                <label className="block text-xs font-bold text-slate-600">
-                  מספר טלפון להזמנה ב־SMS
-                  <input
-                    type="tel"
-                    inputMode="tel"
-                    dir="ltr"
-                    value={invitePhone}
-                    onChange={(event) => setInvitePhone(event.target.value)}
-                    placeholder="0501234567"
-                    className="mt-1 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                  />
-                </label>
-
-                <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-bold text-slate-600">הזמנה לפי שם משתמש או אימייל</p>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-                    <input
-                      type="text"
-                      value={inviteIdentifierInput}
-                      onChange={(event) => setInviteIdentifierInput(event.target.value)}
-                      placeholder="שם משתמש או אימייל"
-                      className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void inviteMemberByIdentifier();
-                      }}
-                      disabled={inviteByUserLoading}
-                      className="min-h-11 rounded-2xl bg-teal-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-teal-500 disabled:opacity-50"
-                    >
-                      {inviteByUserLoading ? "שולח..." : "הזמן לבית"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2">
-                  <p className="text-[11px] font-bold text-slate-500">קוד הזמנה</p>
-                  <p className="text-sm font-bold tracking-wider text-slate-800">{inviteToken || activeHouse?.id || "-"}</p>
-                  <p className="mt-1 truncate text-[11px] font-bold text-slate-500" dir="ltr">
-                    {inviteLink || ""}
-                  </p>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <a
-                    href={normalizedPhone ? smsHref : "#"}
-                    className={`flex min-h-11 items-center justify-center rounded-2xl px-4 py-2 text-sm font-bold text-white transition ${normalizedPhone ? "bg-slate-800 hover:bg-slate-700" : "pointer-events-none bg-slate-300"}`}
-                  >
-                    שליחת SMS
-                  </a>
-                  <button
-                    type="button"
-                    onClick={shareInviteLink}
-                    className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-                  >
-                    שיתוף לינק
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyInviteLink}
-                    className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50 sm:col-span-2"
-                  >
-                    העתקת לינק לבית
-                  </button>
-                </div>
-
-                {inviteFeedback && (
-                  <p className="mt-2 rounded-xl bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700">
-                    {inviteFeedback}
-                  </p>
-                )}
-              </div>
-            </div>
+            <InviteModal
+              invitePhone={invitePhone}
+              onInvitePhoneChange={setInvitePhone}
+              inviteIdentifierInput={inviteIdentifierInput}
+              onInviteIdentifierChange={setInviteIdentifierInput}
+              inviteByUserLoading={inviteByUserLoading}
+              inviteToken={inviteToken}
+              inviteLink={inviteLink}
+              normalizedPhone={normalizedPhone}
+              smsHref={smsHref}
+              inviteFeedback={inviteFeedback}
+              houseId={activeHouse?.id}
+              onInviteMember={() => void inviteMemberByIdentifier()}
+              onShareLink={() => void shareInviteLink()}
+              onCopyLink={() => void copyInviteLink()}
+              onClose={() => setIsInviteModalOpen(false)}
+            />
           )}
       </div>
 
@@ -3833,21 +3865,18 @@ export default function HomePage() {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="relative mx-auto mb-3 h-24 w-24">
                 <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200">
-                  {userProfileImage ? (
-                    <Image
-                      loader={passthroughImageLoader}
-                      unoptimized
-                      src={userProfileImage}
-                      alt="תמונת משתמש"
-                      width={96}
-                      height={96}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-3xl font-bold text-teal-700">
-                      {userProfileName.trim().slice(0, 1) || "?"}
-                    </span>
-                  )}
+                  <SafeImage
+                    src={userProfileImage}
+                    alt="תמונת משתמש"
+                    width={96}
+                    height={96}
+                    className="h-full w-full object-cover"
+                    fallback={
+                      <span className="text-3xl font-bold text-teal-700">
+                        {userProfileName.trim().slice(0, 1) || "?"}
+                      </span>
+                    }
+                  />
                 </div>
                 <button
                   type="button"
@@ -3909,175 +3938,54 @@ export default function HomePage() {
       )}
 
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-3 sm:items-center">
-          <div className="w-full max-w-md rounded-3xl border border-white/70 bg-white p-5 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">הגדרות בית</h3>
-              <button
-                type="button"
-                onClick={() => setIsSettingsOpen(false)}
-                className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
-              >
-                סגור
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="relative mx-auto mb-3 h-24 w-24">
-                <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200">
-                  {settingsHouseImage ? (
-                    <Image
-                      loader={passthroughImageLoader}
-                      unoptimized
-                      src={settingsHouseImage}
-                      alt="תמונת בית"
-                      width={96}
-                      height={96}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-4xl">🏠</span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={openHouseImagePicker}
-                  className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg"
-                  title="החלפת תמונה"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m12 20 7-7-3-3-7 7-1 4z" />
-                    <path d="m15 7 3 3" />
-                  </svg>
-                </button>
-                <input
-                  ref={houseImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={(event) => handleSettingsImageFile(event.target.files?.[0])}
-                  className="hidden"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-600">
-                  שם הבית
-                  <input
-                    value={settingsHouseName}
-                    onChange={(event) => setSettingsHouseName(event.target.value)}
-                    className="mt-1 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                    placeholder="הכנס שם לבית"
-                  />
-                </label>
-
-                <p className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-500">
-                  שינוי תמונה דרך אייקון העריכה ליד התמונה
-                </p>
-              </div>
-            </div>
-
-            {settingsError && (
-              <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
-                {settingsError}
-              </p>
-            )}
-
-            <button
-              type="button"
-              onClick={saveHouseSettings}
-              disabled={isSavingSettings}
-              className="mt-4 min-h-11 w-full rounded-2xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50"
-            >
-              {isSavingSettings ? "שומר..." : "שמור הגדרות"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsSettingsOpen(false);
-                setIsUserProfileOpen(true);
-              }}
-              className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              פרופיל משתמש
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsSettingsOpen(false);
-                void openInviteModal();
-              }}
-              className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              שיתוף והזמנה לבית
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsSettingsOpen(false);
-                if (activeUser?.id) {
-                  window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-                }
-                setActiveHouse(null);
-                setInviteToken("");
-              }}
-              className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              בחירת בית אחר
-            </button>
-
-            {activeHouse?.owner_user_id === activeUser?.id && (
-              <button
-                type="button"
-                onClick={() => {
-                  void deleteActiveHouse();
-                }}
-                disabled={isDeletingHouse}
-                className="mt-3 min-h-11 w-full rounded-2xl bg-rose-600 px-4 text-sm font-bold text-white transition hover:bg-rose-500 disabled:opacity-50"
-              >
-                {isDeletingHouse ? "מוחק בית..." : "מחיקת בית"}
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={async () => {
-                if (supabase) {
-                  await supabase.auth.signOut();
-                }
-                setIsSettingsOpen(false);
-                window.localStorage.removeItem(CACHED_USER_KEY);
-                window.localStorage.removeItem(CACHED_ACTIVE_HOUSE_KEY);
-                setActiveUser(null);
-                setActiveHouse(null);
-                setMemberHouses([]);
-                setInviteToken("");
-                setAuthError("");
-                if (activeUser?.id) {
-                  window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-                }
-                setUsernameInput("");
-                setUserPasswordInput("");
-                setDisplayNameInput("");
-                setUserAvatarInput("");
-              }}
-              className="mt-4 min-h-11 w-full rounded-2xl bg-rose-600 px-4 text-sm font-bold text-white transition hover:bg-rose-500"
-            >
-              התנתק
-            </button>
-          </div>
-        </div>
+        <SettingsModal
+          settingsHouseName={settingsHouseName}
+          onSettingsHouseNameChange={setSettingsHouseName}
+          settingsHouseImage={settingsHouseImage}
+          onSettingsImageFile={handleSettingsImageFile}
+          isSavingSettings={isSavingSettings}
+          isDeletingHouse={isDeletingHouse}
+          settingsError={settingsError}
+          isOwner={activeHouse?.owner_user_id === activeUser?.id}
+          onSave={() => void saveHouseSettings()}
+          onDelete={() => void deleteActiveHouse()}
+          onClose={() => setIsSettingsOpen(false)}
+          onOpenUserProfile={() => {
+            setIsSettingsOpen(false);
+            setIsUserProfileOpen(true);
+          }}
+          onOpenInvite={() => {
+            setIsSettingsOpen(false);
+            void openInviteModal();
+          }}
+          onSwitchHouse={() => {
+            setIsSettingsOpen(false);
+            if (activeUser?.id) {
+              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
+            }
+            setActiveHouse(null);
+            setInviteToken("");
+          }}
+          onSignOut={async () => {
+            if (supabase) {
+              await supabase.auth.signOut();
+            }
+            setIsSettingsOpen(false);
+            window.localStorage.removeItem(CACHED_USER_KEY);
+            setActiveUser(null);
+            setActiveHouse(null);
+            setMemberHouses([]);
+            setInviteToken("");
+            setAuthError("");
+            if (activeUser?.id) {
+              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
+            }
+            setUsernameInput("");
+            setUserPasswordInput("");
+            setDisplayNameInput("");
+            setUserAvatarInput("");
+          }}
+        />
       )}
     </main>
   );

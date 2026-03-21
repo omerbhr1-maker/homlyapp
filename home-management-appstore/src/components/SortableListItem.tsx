@@ -1,0 +1,145 @@
+"use client";
+
+import Image from "next/image";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { passthroughImageLoader } from "@/lib/utils";
+import type { Item } from "@/types";
+
+export function SortableListItem({
+  sortableId,
+  item,
+  createdByAvatarUrl,
+  addedAtLabel,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  sortableId: string;
+  item: Item;
+  createdByAvatarUrl?: string;
+  addedAtLabel: string;
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id: sortableId });
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 py-2 ${
+        isDragging ? "z-20 opacity-40 shadow-lg" : ""
+      }`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl border border-slate-200 text-slate-500 active:cursor-grabbing"
+        title="גרור לשינוי סדר"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="9" cy="6" r="1" />
+          <circle cx="9" cy="12" r="1" />
+          <circle cx="9" cy="18" r="1" />
+          <circle cx="15" cy="6" r="1" />
+          <circle cx="15" cy="12" r="1" />
+          <circle cx="15" cy="18" r="1" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right"
+      >
+        <span
+          className={`h-5 w-5 shrink-0 rounded-full border ${
+            item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"
+          }`}
+        />
+        <span className="min-w-0 flex-1">
+          <span
+            className={`block truncate text-sm ${
+              item.completed ? "text-slate-400 line-through" : "text-slate-700"
+            }`}
+          >
+            {item.text}
+          </span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+            {createdByAvatarUrl ? (
+              <Image
+                loader={passthroughImageLoader}
+                unoptimized
+                src={createdByAvatarUrl}
+                alt="משתמש"
+                width={14}
+                height={14}
+                className="h-3.5 w-3.5 rounded-full object-cover"
+              />
+            ) : (
+              <span className="h-3.5 w-3.5 rounded-full bg-slate-300" />
+            )}
+            <span>{addedAtLabel}</span>
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label="עריכה"
+        title="עריכה"
+        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m12 20 7-7-3-3-7 7-1 4z" />
+          <path d="m15 7 3 3" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label="מחיקה"
+        title="מחיקה"
+        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6h18" />
+          <path d="M8 6V4h8v2" />
+          <path d="M19 6l-1 14H6L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+        </svg>
+      </button>
+    </li>
+  );
+}
