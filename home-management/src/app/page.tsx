@@ -576,6 +576,7 @@ const SELECTED_HOUSE_KEY_PREFIX = "homly_selected_house_";
 const CACHED_USER_KEY = "homly_cached_user";
 const CACHED_HOUSE_META_KEY_PREFIX = "homly_cached_house_meta_";
 const CACHED_HOUSE_MEMBERS_KEY_PREFIX = "homly_cached_house_members_";
+const CACHED_HOUSE_SECTIONS_KEY_PREFIX = "homly_cached_sections_";
 
 function getSelectedHouseStorageKey(userId: string) {
   return `${SELECTED_HOUSE_KEY_PREFIX}${userId}`;
@@ -587,6 +588,10 @@ function getCachedHouseMetaStorageKey(userId: string) {
 
 function getCachedHouseMembersStorageKey(houseId: string) {
   return `${CACHED_HOUSE_MEMBERS_KEY_PREFIX}${houseId}`;
+}
+
+function getCachedHouseSectionsStorageKey(houseId: string) {
+  return `${CACHED_HOUSE_SECTIONS_KEY_PREFIX}${houseId}`;
 }
 
 async function setPersistentCacheValue(key: string, value: string) {
@@ -866,6 +871,9 @@ export default function HomePage() {
   const houseMembersRequestRef = useRef(0);
   const houseSaveRequestRef = useRef(0);
   const isHousePersistingRef = useRef(false);
+  // True from the moment the user makes a local change until the save completes.
+  // Blocks real-time / loadUserHouses from overwriting unsaved local state.
+  const hasPendingLocalChangesRef = useRef(false);
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -903,6 +911,30 @@ export default function HomePage() {
               setHouseMembers((current) => (current.length > 0 ? current : parsedMembers));
             }
           }
+          // Restore cached list items for instant display before network loads.
+          const cachedSectionsRaw = await appCacheStorage.getItem(
+            getCachedHouseSectionsStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedSectionsRaw && !cancelled) {
+            try {
+              const parsedSections = JSON.parse(cachedSectionsRaw) as Record<SectionKey, Item[]>;
+              const normalized = normalizeCloudSections(parsedSections);
+              setSections((current) => {
+                const hasItems =
+                  current.homeTasks.items.length > 0 ||
+                  current.generalShopping.items.length > 0 ||
+                  current.supermarketShopping.items.length > 0;
+                if (hasItems) return current;
+                return {
+                  homeTasks: { ...initialSections.homeTasks, items: normalized.homeTasks },
+                  generalShopping: { ...initialSections.generalShopping, items: normalized.generalShopping },
+                  supermarketShopping: { ...initialSections.supermarketShopping, items: normalized.supermarketShopping },
+                };
+              });
+            } catch {
+              // Ignore malformed cached sections.
+            }
+          }
         }
       } catch {
         // Ignore native bootstrap cache errors.
@@ -931,6 +963,23 @@ export default function HomePage() {
             const parsedMembers = JSON.parse(cachedMembersRaw) as HouseMemberUser[];
             if (Array.isArray(parsedMembers)) {
               setHouseMembers(parsedMembers);
+            }
+          }
+          // Restore cached list items for instant display before network loads.
+          const cachedSectionsRaw = window.localStorage.getItem(
+            getCachedHouseSectionsStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedSectionsRaw) {
+            try {
+              const parsedSections = JSON.parse(cachedSectionsRaw) as Record<SectionKey, Item[]>;
+              const normalized = normalizeCloudSections(parsedSections);
+              setSections({
+                homeTasks: { ...initialSections.homeTasks, items: normalized.homeTasks },
+                generalShopping: { ...initialSections.generalShopping, items: normalized.generalShopping },
+                supermarketShopping: { ...initialSections.supermarketShopping, items: normalized.supermarketShopping },
+              });
+            } catch {
+              // Ignore malformed cached sections.
             }
           }
         }
@@ -999,6 +1048,9 @@ export default function HomePage() {
         void removePersistentCacheValue(CACHED_USER_KEY);
         if (previousAuthId) {
           void removePersistentCacheValue(getCachedHouseMetaStorageKey(previousAuthId));
+        }
+        if (activeHouseRef.current?.id) {
+          void removePersistentCacheValue(getCachedHouseSectionsStorageKey(activeHouseRef.current.id));
         }
       }
     };
@@ -1159,12 +1211,9 @@ export default function HomePage() {
         if (!cancelled) setIsAuthReady(true);
         return;
       }
-      if (
-        event === "TOKEN_REFRESHED" &&
-        nextAuthId &&
-        activeAuthUserIdRef.current &&
-        nextAuthId === activeAuthUserIdRef.current
-      ) {
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        // Token refresh / user metadata updates should never re-fetch house data or
+        // overwrite local unsaved changes. Session validity is maintained by Supabase.
         if (!cancelled) setIsAuthReady(true);
         return;
       }
@@ -1204,6 +1253,9 @@ export default function HomePage() {
       return;
     }
 
+    // Mark that we have unsaved local changes — blocks cloud data from overwriting them.
+    hasPendingLocalChangesRef.current = true;
+
     const timeout = setTimeout(async () => {
       const house = activeHouseRef.current;
       const user = activeUserRef.current;
@@ -1228,6 +1280,7 @@ export default function HomePage() {
       if (requestId !== houseSaveRequestRef.current) return;
 
       isHousePersistingRef.current = false;
+      hasPendingLocalChangesRef.current = false;
       if (error) {
         setHouseListError("שמירת השינויים נכשלה, מנסה לרענן מהענן...");
         if (user?.id) {
@@ -1237,9 +1290,21 @@ export default function HomePage() {
       }
 
       setHouseListError("");
+      // Cache sections for instant display on next app open.
+      void setPersistentCacheValue(
+        getCachedHouseSectionsStorageKey(house.id),
+        JSON.stringify({
+          homeTasks: sections.homeTasks.items,
+          generalShopping: sections.generalShopping.items,
+          supermarketShopping: sections.supermarketShopping.items,
+        }),
+      );
     }, 500);
 
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      hasPendingLocalChangesRef.current = false;
+    };
     // activeHouse is intentionally not in deps to avoid save loops from cloud apply.
     // The ref is used inside the callback for fresh data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1386,7 +1451,10 @@ export default function HomePage() {
                 : (currentHouse?.owner_user_id ?? null),
             updated_at: typeof next.updated_at === "string" ? next.updated_at : currentHouse?.updated_at,
           };
-          if (isHousePersistingRef.current && currentHouse?.id === syncedHouse.id) {
+          if (
+            (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
+            currentHouse?.id === syncedHouse.id
+          ) {
             setMemberHouses((prev) =>
               prev.map((house) => (house.id === syncedHouse.id ? { ...house, ...syncedHouse } : house)),
             );
@@ -1431,7 +1499,7 @@ export default function HomePage() {
     // If channel doesn't subscribe quickly, keep data fresh via polling fallback.
     fallbackBootstrapTimeout = setTimeout(() => {
       startFallbackSync();
-    }, 7000);
+    }, 3000);
 
     return () => {
       if (fallbackBootstrapTimeout) {
@@ -2251,6 +2319,25 @@ const saveUserProfileSettings = async () => {
     const normalizedHouse = { ...house, sections: normalizedSections };
     // Mark timestamp so the save effect skips saving data that just came from the cloud.
     lastCloudApplyRef.current = Date.now();
+
+    if (hasPendingLocalChangesRef.current) {
+      // User has unsaved local changes — update only house metadata, never the list items.
+      setActiveHouse((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: normalizedHouse.name,
+              pin: normalizedHouse.pin,
+              house_image: normalizedHouse.house_image,
+              invite_phone: normalizedHouse.invite_phone,
+              owner_user_id: normalizedHouse.owner_user_id,
+              updated_at: normalizedHouse.updated_at,
+            }
+          : normalizedHouse,
+      );
+      return;
+    }
+
     setActiveHouse(normalizedHouse);
     setSections({
       homeTasks: { ...initialSections.homeTasks, items: normalizedSections.homeTasks },
@@ -2418,7 +2505,10 @@ const saveUserProfileSettings = async () => {
       houses[0];
 
     if (nextHouse) {
-      if (isHousePersistingRef.current && activeHouse?.id === nextHouse.id) {
+      if (
+        (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
+        activeHouse?.id === nextHouse.id
+      ) {
         setIsHouseLoading(false);
         return;
       }

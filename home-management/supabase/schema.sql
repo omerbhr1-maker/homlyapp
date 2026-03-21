@@ -252,3 +252,8 @@ create policy "house_invites_insert"
 on public.house_invites
 for insert
 with check (public.is_house_member(house_id));
+
+-- Enable Supabase Realtime for live sync between users.
+-- Without this, postgres_changes subscriptions receive no events.
+alter publication supabase_realtime add table public.houses;
+alter publication supabase_realtime add table public.house_members;

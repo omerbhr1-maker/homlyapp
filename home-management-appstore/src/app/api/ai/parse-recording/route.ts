@@ -14,6 +14,12 @@ type ParseResponse = {
   source: "ai" | "fallback";
 };
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 const sectionTitles: Record<SectionKey, string> = {
   homeTasks: "משימות בית",
   generalShopping: "רשימת קניות כללית",
@@ -27,8 +33,25 @@ function fallbackItems(text: string): ParseResponse {
   };
 }
 
+function jsonWithCors<T>(body: T, init?: ResponseInit) {
+  return NextResponse.json<T>(body, {
+    ...init,
+    headers: {
+      ...corsHeaders,
+      ...(init?.headers || {}),
+    },
+  });
+}
+
+export function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
+
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   const body = (await request.json().catch(() => ({}))) as ParseRequest;
   const text = String(body.text || "").trim();
   const rawSectionKey = body.sectionKey;
@@ -40,11 +63,11 @@ export async function POST(request: Request) {
       : "supermarketShopping";
 
   if (!text) {
-    return NextResponse.json<ParseResponse>({ items: [], source: "fallback" });
+    return jsonWithCors<ParseResponse>({ items: [], source: "fallback" });
   }
 
   if (!apiKey) {
-    return NextResponse.json<ParseResponse>(fallbackItems(text));
+    return jsonWithCors<ParseResponse>(fallbackItems(text));
   }
 
   try {
@@ -103,7 +126,7 @@ export async function POST(request: Request) {
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return NextResponse.json<ParseResponse>(fallbackItems(text));
+      return jsonWithCors<ParseResponse>(fallbackItems(text));
     }
 
     const data = (await response.json()) as OpenAIResponsesPayload;
@@ -119,11 +142,11 @@ export async function POST(request: Request) {
     );
 
     if (items.length === 0) {
-      return NextResponse.json<ParseResponse>(fallbackItems(text));
+      return jsonWithCors<ParseResponse>(fallbackItems(text));
     }
 
-    return NextResponse.json<ParseResponse>({ items, source: "ai" });
+    return jsonWithCors<ParseResponse>({ items, source: "ai" });
   } catch {
-    return NextResponse.json<ParseResponse>(fallbackItems(text));
+    return jsonWithCors<ParseResponse>(fallbackItems(text));
   }
 }

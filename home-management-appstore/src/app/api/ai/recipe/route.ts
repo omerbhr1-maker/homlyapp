@@ -27,6 +27,12 @@ type RecipeRequest = {
   answers?: Record<string, RecipeAnswerValue>;
 };
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 function getAnswerValues(value: RecipeAnswerValue | undefined) {
   if (Array.isArray(value)) {
     return value.map((item) => item.trim()).filter(Boolean);
@@ -167,14 +173,31 @@ function fallbackRecipe(
   };
 }
 
+function jsonWithCors<T>(body: T, init?: ResponseInit) {
+  return NextResponse.json<T>(body, {
+    ...init,
+    headers: {
+      ...corsHeaders,
+      ...(init?.headers || {}),
+    },
+  });
+}
+
+export function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
+
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   const body = (await request.json().catch(() => ({}))) as RecipeRequest;
   const recipeText = String(body.recipeText || "").trim();
   const answers = body.answers || {};
 
   if (!recipeText) {
-    return NextResponse.json<RecipeResponse>({
+    return jsonWithCors<RecipeResponse>({
       needs_clarification: false,
       questions: [],
       items: [],
@@ -184,7 +207,7 @@ export async function POST(request: Request) {
   }
 
   if (!apiKey) {
-    return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+    return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
   }
 
   try {
@@ -269,7 +292,7 @@ export async function POST(request: Request) {
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+      return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
     }
 
     const data = (await response.json()) as OpenAIResponsesPayload;
@@ -281,15 +304,15 @@ export async function POST(request: Request) {
       !Array.isArray(parsed.questions) ||
       !Array.isArray(parsed.items)
     ) {
-      return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+      return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
     }
 
     const questions = normalizeRecipeQuestions(parsed.questions);
     if (parsed.needs_clarification) {
       if (questions.length === 0) {
-        return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+        return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
       }
-      return NextResponse.json<RecipeResponse>({
+      return jsonWithCors<RecipeResponse>({
         needs_clarification: true,
         questions,
         items: [],
@@ -317,10 +340,10 @@ export async function POST(request: Request) {
       .filter((item, index, list) => list.findIndex((other) => other.name === item.name) === index);
 
     if (finalItems.length === 0) {
-      return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+      return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
     }
 
-    return NextResponse.json<RecipeResponse>({
+    return jsonWithCors<RecipeResponse>({
       needs_clarification: false,
       questions: [],
       items: finalItems,
@@ -328,7 +351,7 @@ export async function POST(request: Request) {
       source: "ai",
     });
   } catch {
-    return NextResponse.json<RecipeResponse>(fallbackRecipe(recipeText, answers));
+    return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
   }
 }
 

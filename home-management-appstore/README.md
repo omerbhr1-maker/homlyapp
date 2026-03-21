@@ -21,9 +21,15 @@ npm run dev
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_APP_URL=https://home-management-hebrew.pages.dev
+OPENAI_API_KEY=...
 ```
 
 4. להריץ מחדש `npm run dev`.
+
+הערה חשובה:
+- `OPENAI_API_KEY` נשמר בשרת בלבד.
+- לא מגדירים `NEXT_PUBLIC_OPENAI_API_KEY`, כדי לא לחשוף מפתח למשתמשים.
 
 אם ה־env לא מוגדרים, האפליקציה עובדת במצב מקומי (`localStorage`) בלבד.
 
