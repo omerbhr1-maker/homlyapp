@@ -19,6 +19,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@fontsource/assistant": "^5.2.9",
     "@supabase/supabase-js": "^2.57.4",
+    "heic2any": "^0.0.4",
     "next": "15.2.4",
     "pg": "^8.20.0",
     "react": "19.2.3",

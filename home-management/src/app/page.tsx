@@ -1946,9 +1946,29 @@ export default function HomePage() {
     });
 
   const optimizeImageFile = async (file: File, maxSize: number, quality: number) => {
-    const fallback = await readFileAsDataUrl(file);
+    // Auto-convert HEIC/HEIF to JPEG for cross-browser support.
+    let processFile = file;
+    const isHeic =
+      file.type === "image/heic" ||
+      file.type === "image/heif" ||
+      /\.(heic|heif)$/i.test(file.name);
+    if (isHeic) {
+      try {
+        const heic2any = (await import("heic2any")).default;
+        const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
+        processFile = new File(
+          [converted as Blob],
+          file.name.replace(/\.(heic|heif)$/i, ".jpg"),
+          { type: "image/jpeg" },
+        );
+      } catch {
+        // heic2any failed — fall through to canvas attempt (works on iOS Safari natively).
+      }
+    }
+
+    const fallback = await readFileAsDataUrl(processFile);
     try {
-      const objectUrl = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(processFile);
       const image = new window.Image();
       const loaded = new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();
@@ -2365,10 +2385,7 @@ const saveUserProfileSettings = async () => {
     setInvitePhone(house.invite_phone || "");
   };
 
-  const loadHouseMembers = async (
-    houseId: string,
-    seedMemberships?: Array<{ house_id?: string; user_id: string; role?: string | null }>,
-  ) => {
+  const loadHouseMembers = async (houseId: string) => {
     const client = supabase;
     if (!client) return;
 
@@ -2395,31 +2412,24 @@ const saveUserProfileSettings = async () => {
     } catch {
       // Ignore malformed cached house members.
     }
-    const membershipsForHouse = seedMemberships
-      ? seedMemberships.filter((member) => member.house_id === houseId)
-      : null;
-
-    const membershipsResult = membershipsForHouse
-      ? { data: membershipsForHouse, error: null }
-      : await client
-          .from("house_members")
-          .select("house_id,user_id,role")
-          .eq("house_id", houseId);
+    // Single JOIN query instead of two sequential round-trips.
+    const { data: membersData, error: membersError } = await client
+      .from("house_members")
+      .select("role, user_id, app_users!house_members_user_id_fkey(id, display_name, avatar_url)")
+      .eq("house_id", houseId);
 
     if (requestId !== houseMembersRequestRef.current) {
       clearTimeout(loadingGuard);
       return;
     }
 
-    const memberships = membershipsResult.data;
-    if (membershipsResult.error || !memberships) {
+    if (membersError || !membersData) {
       clearTimeout(loadingGuard);
       setIsHouseMembersLoading(false);
       return;
     }
 
-    const userIds = Array.from(new Set(memberships.map((member) => member.user_id)));
-    if (userIds.length === 0) {
+    if (membersData.length === 0) {
       setHouseMembers([]);
       void setPersistentCacheValue(cacheKey, JSON.stringify([]));
       clearTimeout(loadingGuard);
@@ -2427,38 +2437,23 @@ const saveUserProfileSettings = async () => {
       return;
     }
 
-    const { data: users, error: usersError } = await client
-      .from("app_users")
-      .select("id,display_name,avatar_url")
-      .in("id", userIds);
-
-    if (requestId !== houseMembersRequestRef.current) {
-      clearTimeout(loadingGuard);
-      return;
-    }
-
-    if (usersError || !users) {
-      clearTimeout(loadingGuard);
-      setIsHouseMembersLoading(false);
-      return;
-    }
-
-    const members = memberships
-      .map((member) => {
-        const user = users.find((entry) => entry.id === member.user_id);
+    const members = membersData
+      .map((row) => {
+        const rawUser = row.app_users;
+        const user = (Array.isArray(rawUser) ? rawUser[0] : rawUser) as { id: string; display_name: string; avatar_url: string } | null;
         if (!user) return null;
         return {
-          id: user.id as string,
+          id: user.id,
           display_name: String(user.display_name || "משתמש"),
           avatar_url: String(user.avatar_url || ""),
-          role: (member.role as "owner" | "member") || "member",
+          role: (row.role as "owner" | "member") || "member",
         };
       })
       .filter((member): member is HouseMemberUser => Boolean(member));
 
-    const cachedMembers = toCachedHouseMembers(members);
-    setHouseMembers(cachedMembers);
-    void setPersistentCacheValue(cacheKey, JSON.stringify(cachedMembers));
+    // Set full data in state (with base64 avatars) — strip only for the cache.
+    setHouseMembers(members);
+    void setPersistentCacheValue(cacheKey, JSON.stringify(toCachedHouseMembers(members)));
     clearTimeout(loadingGuard);
     setIsHouseMembersLoading(false);
   };
@@ -2525,7 +2520,7 @@ const saveUserProfileSettings = async () => {
         return;
       }
       applyActiveHouse(nextHouse);
-      void loadHouseMembers(nextHouse.id, membershipData as Array<{ house_id?: string; user_id: string; role?: string | null }>);
+      void loadHouseMembers(nextHouse.id);
     } else {
       setActiveHouse(null);
     }
