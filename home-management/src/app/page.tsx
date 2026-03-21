@@ -874,6 +874,10 @@ export default function HomePage() {
   // True from the moment the user makes a local change until the save completes.
   // Blocks real-time / loadUserHouses from overwriting unsaved local state.
   const hasPendingLocalChangesRef = useRef(false);
+  // Incremented every time applyActiveHouse runs — lets the save effect
+  // distinguish "triggered by cloud data" from "triggered by user action".
+  const cloudApplyVersionRef = useRef(0);
+  const lastSeenCloudVersionRef = useRef(0);
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1248,12 +1252,17 @@ export default function HomePage() {
     const client = supabase;
     if (!activeHouse || !client) return;
 
-    // Skip saving if this render was triggered by applying cloud data.
-    if (Date.now() - lastCloudApplyRef.current < 600) {
+    // Detect whether this effect run was triggered by cloud data (applyActiveHouse)
+    // or by a real user action. The version counter is incremented in applyActiveHouse,
+    // so if it changed since last time, this run is cloud-triggered — skip saving.
+    const isFromCloudApply = cloudApplyVersionRef.current !== lastSeenCloudVersionRef.current;
+    lastSeenCloudVersionRef.current = cloudApplyVersionRef.current;
+    if (isFromCloudApply) {
+      hasPendingLocalChangesRef.current = false;
       return;
     }
 
-    // Mark that we have unsaved local changes — blocks cloud data from overwriting them.
+    // User made a local change — protect state from being overwritten.
     hasPendingLocalChangesRef.current = true;
 
     const timeout = setTimeout(async () => {
@@ -1303,7 +1312,8 @@ export default function HomePage() {
 
     return () => {
       clearTimeout(timeout);
-      hasPendingLocalChangesRef.current = false;
+      // Do NOT reset hasPendingLocalChangesRef here — if the debounce was
+      // interrupted by another user change, we still have unsaved state.
     };
     // activeHouse is intentionally not in deps to avoid save loops from cloud apply.
     // The ref is used inside the callback for fresh data.
@@ -2317,8 +2327,10 @@ const saveUserProfileSettings = async () => {
   const applyActiveHouse = (house: CloudHouseRow) => {
     const normalizedSections = normalizeCloudSections(house.sections);
     const normalizedHouse = { ...house, sections: normalizedSections };
-    // Mark timestamp so the save effect skips saving data that just came from the cloud.
+    // Mark timestamp + increment version so the save effect knows this run
+    // was triggered by cloud data (not a user action).
     lastCloudApplyRef.current = Date.now();
+    cloudApplyVersionRef.current++;
 
     if (hasPendingLocalChangesRef.current) {
       // User has unsaved local changes — update only house metadata, never the list items.
