@@ -2037,6 +2037,27 @@ export default function HomePage() {
     }
   };
 
+  const uploadImageToStorage = async (base64: string, path: string): Promise<string> => {
+    const client = supabase;
+    if (!client || !base64.startsWith("data:")) return base64;
+    try {
+      const [header, data] = base64.split(",");
+      if (!data) return base64;
+      const mime = header.match(/data:([^;]+)/)?.[1] ?? "image/jpeg";
+      const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: mime });
+      const { error } = await client.storage.from("homly-images").upload(path, blob, {
+        contentType: mime,
+        upsert: true,
+      });
+      if (error) return base64;
+      const { data: urlData } = client.storage.from("homly-images").getPublicUrl(path);
+      return urlData.publicUrl;
+    } catch {
+      return base64;
+    }
+  };
+
   const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
     const value = await optimizeImageFile(file, 1280, 0.8);
@@ -2055,8 +2076,14 @@ export default function HomePage() {
 
   const handleUserProfileImageFile = async (file?: File) => {
     if (!file) return;
-    const value = await optimizeImageFile(file, 640, 0.82);
-    if (value) setUserProfileImage(value);
+    const base64 = await optimizeImageFile(file, 640, 0.82);
+    if (!base64) return;
+    setUserProfileImage(base64); // instant preview
+    const userId = activeUser?.id;
+    if (userId) {
+      const url = await uploadImageToStorage(base64, `avatars/${userId}.jpg`);
+      setUserProfileImage(url);
+    }
   };
 
   const openUserProfileImagePicker = () => {
@@ -2171,15 +2198,32 @@ const saveUserProfileSettings = async () => {
       return;
     }
 
+    const finalHouseImage = await uploadImageToStorage(
+      settingsHouseImage.trim(),
+      `houses/${activeHouse.id}.jpg`,
+    );
+
+    const { error: updateError } = await client
+      .from("houses")
+      .update({ name: nextName, house_image: finalHouseImage })
+      .eq("id", activeHouse.id);
+
+    if (updateError) {
+      setSettingsError("שמירת ההגדרות נכשלה. נסה שוב.");
+      setIsSavingSettings(false);
+      return;
+    }
+
     setActiveHouse((prev) =>
       prev
         ? {
             ...prev,
             name: nextName,
-            house_image: settingsHouseImage.trim(),
+            house_image: finalHouseImage,
           }
         : prev,
     );
+    setSettingsHouseImage(finalHouseImage);
 
     setIsSavingSettings(false);
     setIsSettingsOpen(false);
@@ -2638,6 +2682,7 @@ const saveUserProfileSettings = async () => {
     }
 
     const authUserId = signInData.user.id;
+    const finalAvatarUrl = await uploadImageToStorage(avatarUrl, `avatars/${authUserId}.jpg`);
     const { data: insertedUser, error: insertError } = await client
       .from("app_users")
       .insert({
@@ -2645,7 +2690,7 @@ const saveUserProfileSettings = async () => {
         username,
         password: "",
         display_name: displayName,
-        avatar_url: avatarUrl,
+        avatar_url: finalAvatarUrl,
         auth_user_id: authUserId,
       })
       .select("id,username,display_name,avatar_url,auth_user_id")
@@ -2669,7 +2714,7 @@ const saveUserProfileSettings = async () => {
             auth_user_id: authUserId,
             password: "",
             display_name: displayName,
-            avatar_url: avatarUrl,
+            avatar_url: finalAvatarUrl,
           })
           .eq("id", existingProfile.id)
           .select("id,username,display_name,avatar_url,auth_user_id")

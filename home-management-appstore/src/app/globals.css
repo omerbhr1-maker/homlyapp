@@ -7,6 +7,11 @@
 
 :root {
   --background: #eef4ff;
+  /* Safe Area insets — iPhone notch / Dynamic Island / Home Indicator */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
   --foreground: #1f2937;
   --card: #ffffff;
   --muted: #6b7280;
@@ -56,4 +61,68 @@ textarea::placeholder {
   select {
     font-size: 16px;
   }
+}
+
+/* ── Safe Area & iOS native feel ─────────────────────────────────────────── */
+
+/* גוף האפליקציה — padding לפי Safe Area */
+body {
+  padding-top: var(--sat);
+  padding-bottom: var(--sab);
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+
+/* Capacitor iOS — מניעת bounce scroll על ה-body */
+html.capacitor body {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+html.capacitor #__next,
+html.capacitor main {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: none;
+}
+
+/* keyboard avoidance — כשהקלידה פתוחה */
+body.keyboard-open {
+  padding-bottom: var(--keyboard-height, 0px);
+}
+
+/* tap highlight נייטיב */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* swipe-to-delete — CSS בסיסי */
+.swipe-item {
+  position: relative;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+.swipe-delete-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-left: 1rem;
+  background: #ef4444;
+  color: white;
+  font-weight: 700;
+  font-size: 0.875rem;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.swipe-item.swiping .swipe-delete-bg {
+  opacity: 1;
 }

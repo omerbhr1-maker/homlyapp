@@ -35,7 +35,7 @@ const authStorage = {
   async removeItem(key: string) {
     if (typeof window === "undefined") return;
     if (Capacitor.isNativePlatform()) {
-      nativeSessionCache.set(key, null);
+      nativeSessionCache.delete(key);
       await Preferences.remove({ key });
       return;
     }

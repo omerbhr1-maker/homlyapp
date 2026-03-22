@@ -27,9 +27,13 @@ home-management/
 │   │   ├── layout.tsx                # Root layout (RTL, Hebrew)
 │   │   └── page.tsx                  # Main app page
 │   ├── components/                   # Reusable UI components
-│   ├── lib/supabase.ts               # Supabase client
+│   ├── lib/
+│   │   ├── supabase.ts               # Supabase client
+│   │   └── capacitor.ts             # Haptics, share, keyboard, push notifications
 │   └── types/                        # TypeScript definitions
-├── supabase/schema.sql               # DB schema
+├── supabase/
+│   ├── schema.sql                    # DB schema
+│   └── functions/send-push/          # Edge Function: send push notifications (Deno)
 └── ios/                              # Capacitor iOS project
 ```
 
@@ -70,7 +74,12 @@ npm run build:ios && npm run ios:sync && npm run ios:open
 ## Database Schema (Supabase)
 
 - `app_users` — username, display_name, avatar, auth_user_id
-- `houses` — name, sections (JSONB), owner, invite_phone, house_image
+- `houses` — name, sections (JSONB), owner_user_id, invite_phone, house_image
+- `house_members` — (house_id, user_id, role) — membership table with RLS
+- `house_invites` — token-based invite links per house
+- `push_tokens` — APNs device tokens per user (iOS push notifications)
+
+Storage bucket: `homly-images` — public read, auth-required write (avatars, house images)
 
 ## RTL / Hebrew
 

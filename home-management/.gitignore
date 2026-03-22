@@ -12,10 +12,14 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
+tests/.env.test
 
 # next.js
 /.next/
 /out/
+.next_backup_*/
 
 # production
 /build
