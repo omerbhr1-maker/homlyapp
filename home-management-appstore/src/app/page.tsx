@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
+import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
 import { RecipeModal } from "@/components/RecipeModal";
 import { InviteModal } from "@/components/InviteModal";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -576,6 +577,7 @@ const SELECTED_HOUSE_KEY_PREFIX = "homly_selected_house_";
 const CACHED_USER_KEY = "homly_cached_user";
 const CACHED_HOUSE_META_KEY_PREFIX = "homly_cached_house_meta_";
 const CACHED_HOUSE_MEMBERS_KEY_PREFIX = "homly_cached_house_members_";
+const CACHED_HOUSE_SECTIONS_KEY_PREFIX = "homly_cached_sections_";
 
 function getSelectedHouseStorageKey(userId: string) {
   return `${SELECTED_HOUSE_KEY_PREFIX}${userId}`;
@@ -587,6 +589,10 @@ function getCachedHouseMetaStorageKey(userId: string) {
 
 function getCachedHouseMembersStorageKey(houseId: string) {
   return `${CACHED_HOUSE_MEMBERS_KEY_PREFIX}${houseId}`;
+}
+
+function getCachedHouseSectionsStorageKey(houseId: string) {
+  return `${CACHED_HOUSE_SECTIONS_KEY_PREFIX}${houseId}`;
 }
 
 async function setPersistentCacheValue(key: string, value: string) {
@@ -866,6 +872,13 @@ export default function HomePage() {
   const houseMembersRequestRef = useRef(0);
   const houseSaveRequestRef = useRef(0);
   const isHousePersistingRef = useRef(false);
+  // True from the moment the user makes a local change until the save completes.
+  // Blocks real-time / loadUserHouses from overwriting unsaved local state.
+  const hasPendingLocalChangesRef = useRef(false);
+  // Incremented every time applyActiveHouse runs — lets the save effect
+  // distinguish "triggered by cloud data" from "triggered by user action".
+  const cloudApplyVersionRef = useRef(0);
+  const lastSeenCloudVersionRef = useRef(0);
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -903,6 +916,30 @@ export default function HomePage() {
               setHouseMembers((current) => (current.length > 0 ? current : parsedMembers));
             }
           }
+          // Restore cached list items for instant display before network loads.
+          const cachedSectionsRaw = await appCacheStorage.getItem(
+            getCachedHouseSectionsStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedSectionsRaw && !cancelled) {
+            try {
+              const parsedSections = JSON.parse(cachedSectionsRaw) as Record<SectionKey, Item[]>;
+              const normalized = normalizeCloudSections(parsedSections);
+              setSections((current) => {
+                const hasItems =
+                  current.homeTasks.items.length > 0 ||
+                  current.generalShopping.items.length > 0 ||
+                  current.supermarketShopping.items.length > 0;
+                if (hasItems) return current;
+                return {
+                  homeTasks: { ...initialSections.homeTasks, items: normalized.homeTasks },
+                  generalShopping: { ...initialSections.generalShopping, items: normalized.generalShopping },
+                  supermarketShopping: { ...initialSections.supermarketShopping, items: normalized.supermarketShopping },
+                };
+              });
+            } catch {
+              // Ignore malformed cached sections.
+            }
+          }
         }
       } catch {
         // Ignore native bootstrap cache errors.
@@ -931,6 +968,23 @@ export default function HomePage() {
             const parsedMembers = JSON.parse(cachedMembersRaw) as HouseMemberUser[];
             if (Array.isArray(parsedMembers)) {
               setHouseMembers(parsedMembers);
+            }
+          }
+          // Restore cached list items for instant display before network loads.
+          const cachedSectionsRaw = window.localStorage.getItem(
+            getCachedHouseSectionsStorageKey(parsedHouseMeta.id),
+          );
+          if (cachedSectionsRaw) {
+            try {
+              const parsedSections = JSON.parse(cachedSectionsRaw) as Record<SectionKey, Item[]>;
+              const normalized = normalizeCloudSections(parsedSections);
+              setSections({
+                homeTasks: { ...initialSections.homeTasks, items: normalized.homeTasks },
+                generalShopping: { ...initialSections.generalShopping, items: normalized.generalShopping },
+                supermarketShopping: { ...initialSections.supermarketShopping, items: normalized.supermarketShopping },
+              });
+            } catch {
+              // Ignore malformed cached sections.
             }
           }
         }
@@ -999,6 +1053,9 @@ export default function HomePage() {
         void removePersistentCacheValue(CACHED_USER_KEY);
         if (previousAuthId) {
           void removePersistentCacheValue(getCachedHouseMetaStorageKey(previousAuthId));
+        }
+        if (activeHouseRef.current?.id) {
+          void removePersistentCacheValue(getCachedHouseSectionsStorageKey(activeHouseRef.current.id));
         }
       }
     };
@@ -1159,12 +1216,9 @@ export default function HomePage() {
         if (!cancelled) setIsAuthReady(true);
         return;
       }
-      if (
-        event === "TOKEN_REFRESHED" &&
-        nextAuthId &&
-        activeAuthUserIdRef.current &&
-        nextAuthId === activeAuthUserIdRef.current
-      ) {
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        // Token refresh / user metadata updates should never re-fetch house data or
+        // overwrite local unsaved changes. Session validity is maintained by Supabase.
         if (!cancelled) setIsAuthReady(true);
         return;
       }
@@ -1199,10 +1253,18 @@ export default function HomePage() {
     const client = supabase;
     if (!activeHouse || !client) return;
 
-    // Skip saving if this render was triggered by applying cloud data.
-    if (Date.now() - lastCloudApplyRef.current < 600) {
+    // Detect whether this effect run was triggered by cloud data (applyActiveHouse)
+    // or by a real user action. The version counter is incremented in applyActiveHouse,
+    // so if it changed since last time, this run is cloud-triggered — skip saving.
+    const isFromCloudApply = cloudApplyVersionRef.current !== lastSeenCloudVersionRef.current;
+    lastSeenCloudVersionRef.current = cloudApplyVersionRef.current;
+    if (isFromCloudApply) {
+      hasPendingLocalChangesRef.current = false;
       return;
     }
+
+    // User made a local change — protect state from being overwritten.
+    hasPendingLocalChangesRef.current = true;
 
     const timeout = setTimeout(async () => {
       const house = activeHouseRef.current;
@@ -1228,6 +1290,7 @@ export default function HomePage() {
       if (requestId !== houseSaveRequestRef.current) return;
 
       isHousePersistingRef.current = false;
+      hasPendingLocalChangesRef.current = false;
       if (error) {
         setHouseListError("שמירת השינויים נכשלה, מנסה לרענן מהענן...");
         if (user?.id) {
@@ -1237,9 +1300,22 @@ export default function HomePage() {
       }
 
       setHouseListError("");
+      // Cache sections for instant display on next app open.
+      void setPersistentCacheValue(
+        getCachedHouseSectionsStorageKey(house.id),
+        JSON.stringify({
+          homeTasks: sections.homeTasks.items,
+          generalShopping: sections.generalShopping.items,
+          supermarketShopping: sections.supermarketShopping.items,
+        }),
+      );
     }, 500);
 
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      // Do NOT reset hasPendingLocalChangesRef here — if the debounce was
+      // interrupted by another user change, we still have unsaved state.
+    };
     // activeHouse is intentionally not in deps to avoid save loops from cloud apply.
     // The ref is used inside the callback for fresh data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1386,7 +1462,10 @@ export default function HomePage() {
                 : (currentHouse?.owner_user_id ?? null),
             updated_at: typeof next.updated_at === "string" ? next.updated_at : currentHouse?.updated_at,
           };
-          if (isHousePersistingRef.current && currentHouse?.id === syncedHouse.id) {
+          if (
+            (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
+            currentHouse?.id === syncedHouse.id
+          ) {
             setMemberHouses((prev) =>
               prev.map((house) => (house.id === syncedHouse.id ? { ...house, ...syncedHouse } : house)),
             );
@@ -1410,6 +1489,7 @@ export default function HomePage() {
           const userId = activeUserRef.current?.id;
           if (userId) {
             void loadUserHouses(userId, houseId);
+            void loadHouseMembers(houseId);
           }
         },
       )
@@ -1431,7 +1511,7 @@ export default function HomePage() {
     // If channel doesn't subscribe quickly, keep data fresh via polling fallback.
     fallbackBootstrapTimeout = setTimeout(() => {
       startFallbackSync();
-    }, 7000);
+    }, 3000);
 
     return () => {
       if (fallbackBootstrapTimeout) {
@@ -1473,6 +1553,24 @@ export default function HomePage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Capacitor Keyboard — keyboard avoidance
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    import("@/lib/capacitor").then(({ setupKeyboardListeners }) => {
+      setupKeyboardListeners(
+        (height) => {
+          document.documentElement.style.setProperty("--keyboard-height", `${height}px`);
+          document.body.classList.add("keyboard-open");
+        },
+        () => {
+          document.documentElement.style.setProperty("--keyboard-height", "0px");
+          document.body.classList.remove("keyboard-open");
+        }
+      ).then((fn) => { cleanup = fn; });
+    });
+    return () => { cleanup?.(); };
   }, []);
 
   useEffect(() => {
@@ -1744,16 +1842,19 @@ export default function HomePage() {
     const text = inputs[key].trim();
     if (!text) return;
 
+    void hapticLight();
     addBatchItems(key, [text], "נוסף פריט");
     setInputs((prev) => ({ ...prev, [key]: "" }));
   };
 
-  const handleSubmit = (event: FormEvent, key: SectionKey) => {
+  const handleSubmit = (event: { preventDefault(): void }, key: SectionKey) => {
     event.preventDefault();
     handleAddItem(key);
   };
 
   const toggleComplete = (key: SectionKey, id: number) => {
+    const isCompleting = !sections[key].items.find((i) => i.id === id)?.completed;
+    if (isCompleting) void hapticNotificationSuccess(); else void hapticLight();
     pushUndoState("עודכן פריט");
     setSections((prev) => ({
       ...prev,
@@ -1787,6 +1888,7 @@ export default function HomePage() {
   };
 
   const deleteItem = (key: SectionKey, id: number) => {
+    void hapticHeavy();
     pushUndoState("נמחק פריט");
     setSections((prev) => ({
       ...prev,
@@ -1868,9 +1970,29 @@ export default function HomePage() {
     });
 
   const optimizeImageFile = async (file: File, maxSize: number, quality: number) => {
-    const fallback = await readFileAsDataUrl(file);
+    // Auto-convert HEIC/HEIF to JPEG for cross-browser support.
+    let processFile = file;
+    const isHeic =
+      file.type === "image/heic" ||
+      file.type === "image/heif" ||
+      /\.(heic|heif)$/i.test(file.name);
+    if (isHeic) {
+      try {
+        const heic2any = (await import("heic2any")).default;
+        const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
+        processFile = new File(
+          [converted as Blob],
+          file.name.replace(/\.(heic|heif)$/i, ".jpg"),
+          { type: "image/jpeg" },
+        );
+      } catch {
+        // heic2any failed — fall through to canvas attempt (works on iOS Safari natively).
+      }
+    }
+
+    const fallback = await readFileAsDataUrl(processFile);
     try {
-      const objectUrl = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(processFile);
       const image = new window.Image();
       const loaded = new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();
@@ -2249,8 +2371,29 @@ const saveUserProfileSettings = async () => {
   const applyActiveHouse = (house: CloudHouseRow) => {
     const normalizedSections = normalizeCloudSections(house.sections);
     const normalizedHouse = { ...house, sections: normalizedSections };
-    // Mark timestamp so the save effect skips saving data that just came from the cloud.
+    // Mark timestamp + increment version so the save effect knows this run
+    // was triggered by cloud data (not a user action).
     lastCloudApplyRef.current = Date.now();
+    cloudApplyVersionRef.current++;
+
+    if (hasPendingLocalChangesRef.current) {
+      // User has unsaved local changes — update only house metadata, never the list items.
+      setActiveHouse((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: normalizedHouse.name,
+              pin: normalizedHouse.pin,
+              house_image: normalizedHouse.house_image,
+              invite_phone: normalizedHouse.invite_phone,
+              owner_user_id: normalizedHouse.owner_user_id,
+              updated_at: normalizedHouse.updated_at,
+            }
+          : normalizedHouse,
+      );
+      return;
+    }
+
     setActiveHouse(normalizedHouse);
     setSections({
       homeTasks: { ...initialSections.homeTasks, items: normalizedSections.homeTasks },
@@ -2266,10 +2409,7 @@ const saveUserProfileSettings = async () => {
     setInvitePhone(house.invite_phone || "");
   };
 
-  const loadHouseMembers = async (
-    houseId: string,
-    seedMemberships?: Array<{ house_id?: string; user_id: string; role?: string | null }>,
-  ) => {
+  const loadHouseMembers = async (houseId: string) => {
     const client = supabase;
     if (!client) return;
 
@@ -2296,31 +2436,24 @@ const saveUserProfileSettings = async () => {
     } catch {
       // Ignore malformed cached house members.
     }
-    const membershipsForHouse = seedMemberships
-      ? seedMemberships.filter((member) => member.house_id === houseId)
-      : null;
-
-    const membershipsResult = membershipsForHouse
-      ? { data: membershipsForHouse, error: null }
-      : await client
-          .from("house_members")
-          .select("house_id,user_id,role")
-          .eq("house_id", houseId);
+    // Single JOIN query instead of two sequential round-trips.
+    const { data: membersData, error: membersError } = await client
+      .from("house_members")
+      .select("role, user_id, app_users!house_members_user_id_fkey(id, display_name, avatar_url)")
+      .eq("house_id", houseId);
 
     if (requestId !== houseMembersRequestRef.current) {
       clearTimeout(loadingGuard);
       return;
     }
 
-    const memberships = membershipsResult.data;
-    if (membershipsResult.error || !memberships) {
+    if (membersError || !membersData) {
       clearTimeout(loadingGuard);
       setIsHouseMembersLoading(false);
       return;
     }
 
-    const userIds = Array.from(new Set(memberships.map((member) => member.user_id)));
-    if (userIds.length === 0) {
+    if (membersData.length === 0) {
       setHouseMembers([]);
       void setPersistentCacheValue(cacheKey, JSON.stringify([]));
       clearTimeout(loadingGuard);
@@ -2328,38 +2461,23 @@ const saveUserProfileSettings = async () => {
       return;
     }
 
-    const { data: users, error: usersError } = await client
-      .from("app_users")
-      .select("id,display_name,avatar_url")
-      .in("id", userIds);
-
-    if (requestId !== houseMembersRequestRef.current) {
-      clearTimeout(loadingGuard);
-      return;
-    }
-
-    if (usersError || !users) {
-      clearTimeout(loadingGuard);
-      setIsHouseMembersLoading(false);
-      return;
-    }
-
-    const members = memberships
-      .map((member) => {
-        const user = users.find((entry) => entry.id === member.user_id);
+    const members = membersData
+      .map((row) => {
+        const rawUser = row.app_users;
+        const user = (Array.isArray(rawUser) ? rawUser[0] : rawUser) as { id: string; display_name: string; avatar_url: string } | null;
         if (!user) return null;
         return {
-          id: user.id as string,
+          id: user.id,
           display_name: String(user.display_name || "משתמש"),
           avatar_url: String(user.avatar_url || ""),
-          role: (member.role as "owner" | "member") || "member",
+          role: (row.role as "owner" | "member") || "member",
         };
       })
       .filter((member): member is HouseMemberUser => Boolean(member));
 
-    const cachedMembers = toCachedHouseMembers(members);
-    setHouseMembers(cachedMembers);
-    void setPersistentCacheValue(cacheKey, JSON.stringify(cachedMembers));
+    // Set full data in state (with base64 avatars) — strip only for the cache.
+    setHouseMembers(members);
+    void setPersistentCacheValue(cacheKey, JSON.stringify(toCachedHouseMembers(members)));
     clearTimeout(loadingGuard);
     setIsHouseMembersLoading(false);
   };
@@ -2418,12 +2536,15 @@ const saveUserProfileSettings = async () => {
       houses[0];
 
     if (nextHouse) {
-      if (isHousePersistingRef.current && activeHouse?.id === nextHouse.id) {
+      if (
+        (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
+        activeHouse?.id === nextHouse.id
+      ) {
         setIsHouseLoading(false);
         return;
       }
       applyActiveHouse(nextHouse);
-      void loadHouseMembers(nextHouse.id, membershipData as Array<{ house_id?: string; user_id: string; role?: string | null }>);
+      void loadHouseMembers(nextHouse.id);
     } else {
       setActiveHouse(null);
     }
@@ -2640,6 +2761,20 @@ const saveUserProfileSettings = async () => {
     setAuthLoading(false);
     setUserPasswordInput("");
     await loadUserHouses(user.id);
+    // רישום Push Notification token לאחר כניסה
+    void registerPushToken(user.id);
+  };
+
+  const registerPushToken = async (userId: string) => {
+    const client = supabase;
+    if (!client) return;
+    const { requestPushPermission } = await import("@/lib/capacitor");
+    const token = await requestPushPermission();
+    if (!token) return;
+    await client.from("push_tokens").upsert(
+      { user_id: userId, token, platform: "ios", updated_at: new Date().toISOString() },
+      { onConflict: "user_id,token" }
+    );
   };
 
   const handleForgotPassword = async () => {
@@ -2764,61 +2899,34 @@ const saveUserProfileSettings = async () => {
     if (!client || !activeUser) return false;
     const rawCode = (overrideCode ?? joinTokenInput).trim().toUpperCase();
     const normalizedFallbackHouseCode = fallbackHouseCode?.trim().toUpperCase() || "";
-    if (!rawCode) {
+    if (!rawCode && !normalizedFallbackHouseCode) {
       setHouseListError("יש להזין קוד הזמנה.");
       return false;
     }
 
     setJoinLoading(true);
     setHouseListError("");
-    let targetHouseId = "";
 
-    const { data, error } = await client
-      .from("house_invites")
-      .select("token,house_id")
-      .eq("token", rawCode)
-      .maybeSingle();
+    const { data, error } = await client.rpc("join_house_by_token", {
+      p_token: rawCode,
+      p_house_id: normalizedFallbackHouseCode,
+    });
 
-    if (!error && data) {
-      targetHouseId = (data as CloudInviteRow).house_id;
-    } else if (normalizedFallbackHouseCode) {
-      targetHouseId = normalizedFallbackHouseCode;
-    } else {
-      targetHouseId = rawCode;
-    }
-
-    const { data: existingMembership } = await client
-      .from("house_members")
-      .select("house_id,user_id")
-      .eq("house_id", targetHouseId)
-      .eq("user_id", activeUser.id)
-      .maybeSingle();
-
-    let memberError: { code?: string } | null = null;
-    if (!existingMembership) {
-      const { error } = await client.from("house_members").insert({
-        house_id: targetHouseId,
-        user_id: activeUser.id,
-        role: "member",
-      });
-      memberError = error as { code?: string } | null;
-    }
-
-    if (memberError) {
-      if (memberError.code === "23505") {
-        setJoinTokenInput("");
-        setJoinLoading(false);
-        if (window.location.search.includes("invite=") || window.location.search.includes("house=")) {
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-        await loadUserHouses(activeUser.id, targetHouseId);
-        return true;
-      }
+    if (error || !data) {
       setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
       setJoinLoading(false);
       return false;
     }
 
+    const result = data as { house_id?: string; error?: string; already_member?: boolean };
+
+    if (result.error) {
+      setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
+      setJoinLoading(false);
+      return false;
+    }
+
+    const targetHouseId = result.house_id ?? "";
     setJoinTokenInput("");
     setJoinLoading(false);
     if (window.location.search.includes("invite=") || window.location.search.includes("house=")) {
@@ -2849,11 +2957,44 @@ const saveUserProfileSettings = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeUser?.id]);
 
+  const removeMember = async (memberId: string) => {
+    const client = supabase;
+    if (!client || !activeHouse || !activeUser) return;
+    if (activeHouse.owner_user_id !== activeUser.id) return;
+    if (memberId === activeUser.id) return;
+    const { error } = await client
+      .from("house_members")
+      .delete()
+      .eq("house_id", activeHouse.id)
+      .eq("user_id", memberId);
+    if (!error) {
+      await loadHouseMembers(activeHouse.id);
+    }
+  };
+
+  const leaveHouse = async () => {
+    const client = supabase;
+    if (!client || !activeHouse || !activeUser) return;
+    if (activeHouse.owner_user_id === activeUser.id) return;
+    const { error } = await client
+      .from("house_members")
+      .delete()
+      .eq("house_id", activeHouse.id)
+      .eq("user_id", activeUser.id);
+    if (!error) {
+      setIsSettingsOpen(false);
+      const otherHouse = memberHouses.find((h) => h.id !== activeHouse.id);
+      await loadUserHouses(activeUser.id, otherHouse?.id);
+    }
+  };
+
   const openInviteModal = async () => {
     const client = supabase;
     if (!client || !activeHouse || !activeUser) return;
 
     setInviteFeedback("");
+    setInviteToken("");
+    setInviteByUserLoading(false);
     setIsInviteModalOpen(true);
     const { data: existingInvite } = await client
       .from("house_invites")
@@ -2904,24 +3045,10 @@ const saveUserProfileSettings = async () => {
 
   const shareInviteLink = async () => {
     if (!inviteLink) return;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Homly",
-          text: inviteMessage,
-          url: inviteLink,
-        });
-        setInviteFeedback("הלינק שותף בהצלחה.");
-        return;
-      } catch {
-        // user closed share sheet
-      }
-    }
-
+    void hapticLight();
     try {
-      await navigator.clipboard.writeText(inviteLink);
-      setInviteFeedback("הלינק הועתק ללוח.");
+      await nativeShare({ title: "Homly", text: inviteMessage, url: inviteLink });
+      setInviteFeedback("הלינק שותף בהצלחה.");
     } catch {
       setInviteFeedback("לא הצלחתי לשתף כרגע.");
     }
@@ -3033,7 +3160,7 @@ const saveUserProfileSettings = async () => {
     }
 
     setInviteIdentifierInput("");
-    setInviteFeedback(`הזמנה נשלחה אל ${targetUser.display_name}.`);
+    setInviteFeedback(`${targetUser.display_name} נוסף לבית בהצלחה.`);
     setInviteByUserLoading(false);
   };
 
@@ -3530,6 +3657,16 @@ const saveUserProfileSettings = async () => {
                   בעל הבית
                 </span>
               )}
+              {activeHouse?.owner_user_id === activeUser?.id && member.role !== "owner" && (
+                <button
+                  type="button"
+                  onClick={() => void removeMember(member.id)}
+                  className="mr-auto rounded-lg bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-600 transition hover:bg-rose-100"
+                  title="הסר מהבית"
+                >
+                  הסר
+                </button>
+              )}
             </div>
           ))}
           {houseMembers.length === 0 && (
@@ -3985,6 +4122,7 @@ const saveUserProfileSettings = async () => {
             setDisplayNameInput("");
             setUserAvatarInput("");
           }}
+          onLeaveHouse={() => void leaveHouse()}
         />
       )}
     </main>

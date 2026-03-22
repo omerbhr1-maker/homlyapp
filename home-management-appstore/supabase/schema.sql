@@ -245,10 +245,116 @@ drop policy if exists "house_invites_select" on public.house_invites;
 create policy "house_invites_select"
 on public.house_invites
 for select
-using (auth.uid() is not null);
+using (public.is_house_member(house_id));
+
+-- RPC: join a house by invite token (SECURITY DEFINER bypasses RLS so non-members
+-- can resolve a token to a house_id without being able to browse all tokens).
+create or replace function public.join_house_by_token(p_token text, p_house_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_house_id text;
+  v_user_id  uuid;
+  v_exists   boolean;
+begin
+  v_user_id := public.current_app_user_id();
+  if v_user_id is null then
+    return jsonb_build_object('error', 'not_authenticated');
+  end if;
+
+  -- Try to resolve house_id from token first.
+  select house_id into v_house_id
+  from public.house_invites
+  where token = upper(trim(p_token))
+  limit 1;
+
+  -- Fall back to the provided house_id param.
+  if v_house_id is null then
+    v_house_id := upper(trim(p_house_id));
+  end if;
+
+  if v_house_id is null or v_house_id = '' then
+    return jsonb_build_object('error', 'invalid_code');
+  end if;
+
+  -- Verify the house actually exists.
+  if not exists(select 1 from public.houses where id = v_house_id) then
+    return jsonb_build_object('error', 'invalid_code');
+  end if;
+
+  -- Already a member — return success without inserting.
+  select exists(
+    select 1 from public.house_members
+    where house_id = v_house_id and user_id = v_user_id
+  ) into v_exists;
+
+  if v_exists then
+    return jsonb_build_object('house_id', v_house_id, 'already_member', true);
+  end if;
+
+  insert into public.house_members (house_id, user_id, role)
+  values (v_house_id, v_user_id, 'member');
+
+  return jsonb_build_object('house_id', v_house_id, 'already_member', false);
+end;
+$$;
+
+revoke all on function public.join_house_by_token(text, text) from public;
+grant execute on function public.join_house_by_token(text, text) to authenticated;
 
 drop policy if exists "house_invites_insert" on public.house_invites;
 create policy "house_invites_insert"
 on public.house_invites
 for insert
 with check (public.is_house_member(house_id));
+
+drop policy if exists "house_invites_delete" on public.house_invites;
+create policy "house_invites_delete"
+on public.house_invites
+for delete
+using (public.is_house_owner(house_id));
+
+drop policy if exists "house_members_delete" on public.house_members;
+create policy "house_members_delete"
+on public.house_members
+for delete
+using (
+  public.is_house_owner(house_id)
+  or user_id = public.current_app_user_id()
+);
+
+-- Enable Supabase Realtime for live sync between users.
+-- Without this, postgres_changes subscriptions receive no events.
+alter publication supabase_realtime add table public.houses;
+alter publication supabase_realtime add table public.house_members;
+
+-- Push Notification Tokens
+create table if not exists public.push_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.app_users(id) on delete cascade,
+  token text not null,
+  platform text not null default 'ios',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, token)
+);
+
+alter table public.push_tokens enable row level security;
+
+drop policy if exists "push_tokens_select" on public.push_tokens;
+create policy "push_tokens_select"
+on public.push_tokens for select
+using (user_id = public.current_app_user_id());
+
+drop policy if exists "push_tokens_insert" on public.push_tokens;
+create policy "push_tokens_insert"
+on public.push_tokens for insert
+with check (user_id = public.current_app_user_id());
+
+drop policy if exists "push_tokens_delete" on public.push_tokens;
+create policy "push_tokens_delete"
+on public.push_tokens for delete
+using (user_id = public.current_app_user_id());

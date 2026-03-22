@@ -17,6 +17,7 @@ type SettingsModalProps = {
   onOpenInvite: () => void;
   onSwitchHouse: () => void;
   onSignOut: () => void;
+  onLeaveHouse: () => void;
 };
 
 export function SettingsModal({
@@ -35,6 +36,7 @@ export function SettingsModal({
   onOpenInvite,
   onSwitchHouse,
   onSignOut,
+  onLeaveHouse,
 }: SettingsModalProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -156,6 +158,16 @@ export function SettingsModal({
             className="mt-3 min-h-11 w-full rounded-2xl bg-rose-600 px-4 text-sm font-bold text-white transition hover:bg-rose-500 disabled:opacity-50"
           >
             {isDeletingHouse ? "מוחק בית..." : "מחיקת בית"}
+          </button>
+        )}
+
+        {!isOwner && (
+          <button
+            type="button"
+            onClick={onLeaveHouse}
+            className="mt-3 min-h-11 w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+          >
+            עזוב בית
           </button>
         )}
 

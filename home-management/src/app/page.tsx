@@ -1,10 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
-import { RecipeModal } from "@/components/RecipeModal";
-import { InviteModal } from "@/components/InviteModal";
-import { SettingsModal } from "@/components/SettingsModal";
+import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
 import {
   DndContext,
   DragEndEvent,
@@ -26,6 +24,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { appCacheStorage, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
+
+const RecipeModal = lazy(() => import("@/components/RecipeModal").then((m) => ({ default: m.RecipeModal })));
+const InviteModal = lazy(() => import("@/components/InviteModal").then((m) => ({ default: m.InviteModal })));
+const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
 type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
 
@@ -801,6 +803,7 @@ export default function HomePage() {
   const [userProfileImage, setUserProfileImage] = useState("");
   const [isSavingUserProfile, setIsSavingUserProfile] = useState(false);
   const [userProfileError, setUserProfileError] = useState("");
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [desktopQuery, setDesktopQuery] = useState("");
   const [desktopFilter, setDesktopFilter] = useState<"all" | "open" | "done">("all");
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -874,6 +877,8 @@ export default function HomePage() {
   // True from the moment the user makes a local change until the save completes.
   // Blocks real-time / loadUserHouses from overwriting unsaved local state.
   const hasPendingLocalChangesRef = useRef(false);
+  // When true, the sections useEffect saves immediately (0ms delay) instead of debouncing.
+  const saveImmediatelyRef = useRef(false);
   // Incremented every time applyActiveHouse runs — lets the save effect
   // distinguish "triggered by cloud data" from "triggered by user action".
   const cloudApplyVersionRef = useRef(0);
@@ -1265,6 +1270,9 @@ export default function HomePage() {
     // User made a local change — protect state from being overwritten.
     hasPendingLocalChangesRef.current = true;
 
+    const delay = saveImmediatelyRef.current ? 0 : 500;
+    saveImmediatelyRef.current = false;
+
     const timeout = setTimeout(async () => {
       const house = activeHouseRef.current;
       const user = activeUserRef.current;
@@ -1308,7 +1316,7 @@ export default function HomePage() {
           supermarketShopping: sections.supermarketShopping.items,
         }),
       );
-    }, 500);
+    }, delay);
 
     return () => {
       clearTimeout(timeout);
@@ -1488,6 +1496,7 @@ export default function HomePage() {
           const userId = activeUserRef.current?.id;
           if (userId) {
             void loadUserHouses(userId, houseId);
+            void loadHouseMembers(houseId);
           }
         },
       )
@@ -1551,6 +1560,24 @@ export default function HomePage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Capacitor Keyboard — keyboard avoidance
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    import("@/lib/capacitor").then(({ setupKeyboardListeners }) => {
+      setupKeyboardListeners(
+        (height) => {
+          document.documentElement.style.setProperty("--keyboard-height", `${height}px`);
+          document.body.classList.add("keyboard-open");
+        },
+        () => {
+          document.documentElement.style.setProperty("--keyboard-height", "0px");
+          document.body.classList.remove("keyboard-open");
+        }
+      ).then((fn) => { cleanup = fn; });
+    });
+    return () => { cleanup?.(); };
   }, []);
 
   useEffect(() => {
@@ -1822,26 +1849,41 @@ export default function HomePage() {
     const text = inputs[key].trim();
     if (!text) return;
 
+    void hapticLight();
     addBatchItems(key, [text], "נוסף פריט");
     setInputs((prev) => ({ ...prev, [key]: "" }));
   };
 
-  const handleSubmit = (event: FormEvent, key: SectionKey) => {
+  const handleSubmit = (event: { preventDefault(): void }, key: SectionKey) => {
     event.preventDefault();
     handleAddItem(key);
   };
 
   const toggleComplete = (key: SectionKey, id: number) => {
+    const isCompleting = !sections[key].items.find((i) => i.id === id)?.completed;
+    if (isCompleting) void hapticNotificationSuccess(); else void hapticLight();
+    saveImmediatelyRef.current = true;
     pushUndoState("עודכן פריט");
-    setSections((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        items: prev[key].items.map((item) =>
-          item.id === id ? { ...item, completed: !item.completed } : item,
-        ),
-      },
-    }));
+    setSections((prev) => {
+      const next = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          items: prev[key].items.map((item) =>
+            item.id === id ? { ...item, completed: !item.completed } : item,
+          ),
+        },
+      };
+      if (activeHouseRef.current) {
+        try {
+          window.localStorage.setItem(
+            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
+            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
+          );
+        } catch {}
+      }
+      return next;
+    });
   };
 
   const editItem = (key: SectionKey, id: number) => {
@@ -1865,14 +1907,27 @@ export default function HomePage() {
   };
 
   const deleteItem = (key: SectionKey, id: number) => {
+    void hapticHeavy();
+    saveImmediatelyRef.current = true;
     pushUndoState("נמחק פריט");
-    setSections((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        items: prev[key].items.filter((item) => item.id !== id),
-      },
-    }));
+    setSections((prev) => {
+      const next = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          items: prev[key].items.filter((item) => item.id !== id),
+        },
+      };
+      if (activeHouseRef.current) {
+        try {
+          window.localStorage.setItem(
+            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
+            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
+          );
+        } catch {}
+      }
+      return next;
+    });
   };
 
   const getVisibleItems = (items: Item[]) =>
@@ -1998,23 +2053,55 @@ export default function HomePage() {
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(objectUrl);
 
-      const optimized = canvas.toDataURL("image/jpeg", quality);
-      return optimized || fallback;
+      // Try progressively lower quality until under 200KB (~267K base64 chars).
+      const MAX_CHARS = 270_000;
+      let optimized = canvas.toDataURL("image/jpeg", quality);
+      if (optimized.length > MAX_CHARS) {
+        optimized = canvas.toDataURL("image/jpeg", 0.65);
+      }
+      if (optimized.length > MAX_CHARS) {
+        optimized = canvas.toDataURL("image/jpeg", 0.45);
+      }
+      // Still too large — try at half the size.
+      if (optimized.length > MAX_CHARS && canvas.width > 320) {
+        const small = document.createElement("canvas");
+        small.width = Math.round(canvas.width / 2);
+        small.height = Math.round(canvas.height / 2);
+        small.getContext("2d")?.drawImage(canvas, 0, 0, small.width, small.height);
+        optimized = small.toDataURL("image/jpeg", 0.6);
+      }
+      if (!optimized || optimized.length > MAX_CHARS) return "";
+      return optimized;
     } catch {
+      // Fallback (original file) — only if within size limit.
+      if (fallback.length > 270_000) return "";
       return fallback;
     }
   };
 
   const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
+    setSettingsError("");
     const value = await optimizeImageFile(file, 1280, 0.8);
-    if (value) setSettingsHouseImage(value);
+    setIsProcessingImage(false);
+    if (!value) {
+      setSettingsError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      return;
+    }
+    setSettingsHouseImage(value);
   };
 
   const handleUserAvatarFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
     const value = await optimizeImageFile(file, 640, 0.82);
-    if (value) setUserAvatarInput(value);
+    setIsProcessingImage(false);
+    if (!value) {
+      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      return;
+    }
+    setUserAvatarInput(value);
   };
 
   const openUserAvatarPicker = () => {
@@ -2023,8 +2110,15 @@ export default function HomePage() {
 
   const handleUserProfileImageFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
+    setUserProfileError("");
     const value = await optimizeImageFile(file, 640, 0.82);
-    if (value) setUserProfileImage(value);
+    setIsProcessingImage(false);
+    if (!value) {
+      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      return;
+    }
+    setUserProfileImage(value);
   };
 
   const openUserProfileImagePicker = () => {
@@ -2737,6 +2831,20 @@ const saveUserProfileSettings = async () => {
     setAuthLoading(false);
     setUserPasswordInput("");
     await loadUserHouses(user.id);
+    // רישום Push Notification token לאחר כניסה
+    void registerPushToken(user.id);
+  };
+
+  const registerPushToken = async (userId: string) => {
+    const client = supabase;
+    if (!client) return;
+    const { requestPushPermission } = await import("@/lib/capacitor");
+    const token = await requestPushPermission();
+    if (!token) return;
+    await client.from("push_tokens").upsert(
+      { user_id: userId, token, platform: "ios", updated_at: new Date().toISOString() },
+      { onConflict: "user_id,token" }
+    );
   };
 
   const handleForgotPassword = async () => {
@@ -2861,61 +2969,34 @@ const saveUserProfileSettings = async () => {
     if (!client || !activeUser) return false;
     const rawCode = (overrideCode ?? joinTokenInput).trim().toUpperCase();
     const normalizedFallbackHouseCode = fallbackHouseCode?.trim().toUpperCase() || "";
-    if (!rawCode) {
+    if (!rawCode && !normalizedFallbackHouseCode) {
       setHouseListError("יש להזין קוד הזמנה.");
       return false;
     }
 
     setJoinLoading(true);
     setHouseListError("");
-    let targetHouseId = "";
 
-    const { data, error } = await client
-      .from("house_invites")
-      .select("token,house_id")
-      .eq("token", rawCode)
-      .maybeSingle();
+    const { data, error } = await client.rpc("join_house_by_token", {
+      p_token: rawCode,
+      p_house_id: normalizedFallbackHouseCode,
+    });
 
-    if (!error && data) {
-      targetHouseId = (data as CloudInviteRow).house_id;
-    } else if (normalizedFallbackHouseCode) {
-      targetHouseId = normalizedFallbackHouseCode;
-    } else {
-      targetHouseId = rawCode;
-    }
-
-    const { data: existingMembership } = await client
-      .from("house_members")
-      .select("house_id,user_id")
-      .eq("house_id", targetHouseId)
-      .eq("user_id", activeUser.id)
-      .maybeSingle();
-
-    let memberError: { code?: string } | null = null;
-    if (!existingMembership) {
-      const { error } = await client.from("house_members").insert({
-        house_id: targetHouseId,
-        user_id: activeUser.id,
-        role: "member",
-      });
-      memberError = error as { code?: string } | null;
-    }
-
-    if (memberError) {
-      if (memberError.code === "23505") {
-        setJoinTokenInput("");
-        setJoinLoading(false);
-        if (window.location.search.includes("invite=") || window.location.search.includes("house=")) {
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-        await loadUserHouses(activeUser.id, targetHouseId);
-        return true;
-      }
+    if (error || !data) {
       setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
       setJoinLoading(false);
       return false;
     }
 
+    const result = data as { house_id?: string; error?: string; already_member?: boolean };
+
+    if (result.error) {
+      setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
+      setJoinLoading(false);
+      return false;
+    }
+
+    const targetHouseId = result.house_id ?? "";
     setJoinTokenInput("");
     setJoinLoading(false);
     if (window.location.search.includes("invite=") || window.location.search.includes("house=")) {
@@ -2946,11 +3027,44 @@ const saveUserProfileSettings = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeUser?.id]);
 
+  const removeMember = async (memberId: string) => {
+    const client = supabase;
+    if (!client || !activeHouse || !activeUser) return;
+    if (activeHouse.owner_user_id !== activeUser.id) return;
+    if (memberId === activeUser.id) return;
+    const { error } = await client
+      .from("house_members")
+      .delete()
+      .eq("house_id", activeHouse.id)
+      .eq("user_id", memberId);
+    if (!error) {
+      await loadHouseMembers(activeHouse.id);
+    }
+  };
+
+  const leaveHouse = async () => {
+    const client = supabase;
+    if (!client || !activeHouse || !activeUser) return;
+    if (activeHouse.owner_user_id === activeUser.id) return;
+    const { error } = await client
+      .from("house_members")
+      .delete()
+      .eq("house_id", activeHouse.id)
+      .eq("user_id", activeUser.id);
+    if (!error) {
+      setIsSettingsOpen(false);
+      const otherHouse = memberHouses.find((h) => h.id !== activeHouse.id);
+      await loadUserHouses(activeUser.id, otherHouse?.id);
+    }
+  };
+
   const openInviteModal = async () => {
     const client = supabase;
     if (!client || !activeHouse || !activeUser) return;
 
     setInviteFeedback("");
+    setInviteToken("");
+    setInviteByUserLoading(false);
     setIsInviteModalOpen(true);
     const { data: existingInvite } = await client
       .from("house_invites")
@@ -3001,24 +3115,10 @@ const saveUserProfileSettings = async () => {
 
   const shareInviteLink = async () => {
     if (!inviteLink) return;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Homly",
-          text: inviteMessage,
-          url: inviteLink,
-        });
-        setInviteFeedback("הלינק שותף בהצלחה.");
-        return;
-      } catch {
-        // user closed share sheet
-      }
-    }
-
+    void hapticLight();
     try {
-      await navigator.clipboard.writeText(inviteLink);
-      setInviteFeedback("הלינק הועתק ללוח.");
+      await nativeShare({ title: "Homly", text: inviteMessage, url: inviteLink });
+      setInviteFeedback("הלינק שותף בהצלחה.");
     } catch {
       setInviteFeedback("לא הצלחתי לשתף כרגע.");
     }
@@ -3130,7 +3230,7 @@ const saveUserProfileSettings = async () => {
     }
 
     setInviteIdentifierInput("");
-    setInviteFeedback(`הזמנה נשלחה אל ${targetUser.display_name}.`);
+    setInviteFeedback(`${targetUser.display_name} נוסף לבית בהצלחה.`);
     setInviteByUserLoading(false);
   };
 
@@ -3272,9 +3372,10 @@ const saveUserProfileSettings = async () => {
                     <button
                       type="button"
                       onClick={openUserAvatarPicker}
-                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100"
+                      disabled={isProcessingImage}
+                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                     >
-                      העלאת תמונה
+                      {isProcessingImage ? "מעבד תמונה..." : "העלאת תמונה"}
                     </button>
                     {userAvatarInput && (
                       <button
@@ -3627,6 +3728,16 @@ const saveUserProfileSettings = async () => {
                   בעל הבית
                 </span>
               )}
+              {activeHouse?.owner_user_id === activeUser?.id && member.role !== "owner" && (
+                <button
+                  type="button"
+                  onClick={() => void removeMember(member.id)}
+                  className="mr-auto rounded-lg bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-600 transition hover:bg-rose-100"
+                  title="הסר מהבית"
+                >
+                  הסר
+                </button>
+              )}
             </div>
           ))}
           {houseMembers.length === 0 && (
@@ -3851,7 +3962,7 @@ const saveUserProfileSettings = async () => {
         </DndContext>
 
           {isRecipeModalOpen && (
-            <RecipeModal
+            <Suspense fallback={null}><RecipeModal
               recipeText={recipeText}
               onRecipeTextChange={setRecipeText}
               recipeQuestions={recipeQuestions}
@@ -3873,11 +3984,11 @@ const saveUserProfileSettings = async () => {
                 setRecipeRecording(false);
                 recipeRecognitionRef.current?.stop();
               }}
-            />
+            /></Suspense>
           )}
 
           {isInviteModalOpen && (
-            <InviteModal
+            <Suspense fallback={null}><InviteModal
               invitePhone={invitePhone}
               onInvitePhoneChange={setInvitePhone}
               inviteIdentifierInput={inviteIdentifierInput}
@@ -3893,7 +4004,7 @@ const saveUserProfileSettings = async () => {
               onShareLink={() => void shareInviteLink()}
               onCopyLink={() => void copyInviteLink()}
               onClose={() => setIsInviteModalOpen(false)}
-            />
+            /></Suspense>
           )}
       </div>
 
@@ -3978,8 +4089,9 @@ const saveUserProfileSettings = async () => {
                 <button
                   type="button"
                   onClick={openUserProfileImagePicker}
-                  className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg"
-                  title="החלפת תמונה"
+                  disabled={isProcessingImage}
+                  className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg disabled:opacity-50"
+                  title={isProcessingImage ? "מעבד תמונה..." : "החלפת תמונה"}
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -4035,7 +4147,7 @@ const saveUserProfileSettings = async () => {
       )}
 
       {isSettingsOpen && (
-        <SettingsModal
+        <Suspense fallback={null}><SettingsModal
           settingsHouseName={settingsHouseName}
           onSettingsHouseNameChange={setSettingsHouseName}
           settingsHouseImage={settingsHouseImage}
@@ -4082,7 +4194,8 @@ const saveUserProfileSettings = async () => {
             setDisplayNameInput("");
             setUserAvatarInput("");
           }}
-        />
+          onLeaveHouse={() => void leaveHouse()}
+        /></Suspense>
       )}
     </main>
   );
