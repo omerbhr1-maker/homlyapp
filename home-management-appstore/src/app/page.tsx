@@ -879,6 +879,7 @@ export default function HomePage() {
   // distinguish "triggered by cloud data" from "triggered by user action".
   const cloudApplyVersionRef = useRef(0);
   const lastSeenCloudVersionRef = useRef(0);
+  const lastAcceptedCloudUpdatedAtRef = useRef("");
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1462,6 +1463,13 @@ export default function HomePage() {
                 : (currentHouse?.owner_user_id ?? null),
             updated_at: typeof next.updated_at === "string" ? next.updated_at : currentHouse?.updated_at,
           };
+          if (
+            syncedHouse.updated_at &&
+            lastAcceptedCloudUpdatedAtRef.current &&
+            syncedHouse.updated_at <= lastAcceptedCloudUpdatedAtRef.current
+          ) {
+            return;
+          }
           if (
             (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
             currentHouse?.id === syncedHouse.id
@@ -2375,6 +2383,9 @@ const saveUserProfileSettings = async () => {
     // was triggered by cloud data (not a user action).
     lastCloudApplyRef.current = Date.now();
     cloudApplyVersionRef.current++;
+    if (house.updated_at) {
+      lastAcceptedCloudUpdatedAtRef.current = house.updated_at;
+    }
 
     if (hasPendingLocalChangesRef.current) {
       // User has unsaved local changes — update only house metadata, never the list items.
