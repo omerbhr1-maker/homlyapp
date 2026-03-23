@@ -105,6 +105,16 @@ body.keyboard-open {
   50% { transform: scaleY(1); }
 }
 
+/* Bottom nav — hide when keyboard is open or recording */
+nav.bottom-nav {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+body.keyboard-open nav.bottom-nav {
+  transform: translateY(150%);
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* swipe-to-delete — CSS בסיסי */
 .swipe-item {
   position: relative;

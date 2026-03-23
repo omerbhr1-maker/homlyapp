@@ -465,32 +465,45 @@ function HomeLogo({ houseName, houseImage }: { houseName?: string; houseImage?: 
   );
 }
 
-function AudioWaveIcon() {
-  const bars: [string, string][] = [
-    ["35%", "0s"],
-    ["65%", "0.15s"],
-    ["90%", "0.3s"],
-    ["65%", "0.45s"],
-  ];
+function LoadingBar({ done }: { done?: boolean }) {
+  const [pct, setPct] = useState(0);
+  const pctRef = useRef(0);
+
+  useEffect(() => {
+    pctRef.current = 0;
+    setPct(0);
+    const timer = setInterval(() => {
+      const cur = pctRef.current;
+      if (cur >= 90) { clearInterval(timer); return; }
+      const step = cur < 30 ? 9 : cur < 60 ? 6 : cur < 80 ? 3 : 1;
+      pctRef.current = Math.min(90, cur + step);
+      setPct(Math.round(pctRef.current));
+    }, 130);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (done) setPct(100);
+  }, [done]);
+
   return (
-    <span
-      aria-hidden="true"
-      style={{ display: "inline-flex", alignItems: "center", gap: "2px", width: "18px", height: "16px" }}
-    >
-      {bars.map(([h, delay], i) => (
-        <span
-          key={i}
-          style={{
-            display: "block",
-            width: "3px",
-            height: h,
-            borderRadius: "2px",
-            backgroundColor: "currentColor",
-            transformOrigin: "center",
-            animation: "audioWaveBar 0.7s ease-in-out infinite",
-            animationDelay: delay,
-          }}
+    <div className="mt-5">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-gradient-to-l from-teal-500 to-cyan-500 transition-all duration-300"
+          style={{ width: `${pct}%` }}
         />
+      </div>
+      <p className="mt-2 text-xs font-bold text-teal-600">{pct}%</p>
+    </div>
+  );
+}
+
+function AudioWaveIcon() {
+  return (
+    <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "flex-end", gap: "2px", width: "18px", height: "16px" }}>
+      {(["6px","11px","14px","11px"] as const).map((h, i) => (
+        <span key={i} style={{ display: "block", width: "3px", height: h, borderRadius: "2px", backgroundColor: "currentColor", transformOrigin: "bottom", animation: "audioWaveBar 0.7s ease-in-out infinite", animationDelay: `${i * 0.15}s` }} />
       ))}
     </span>
   );
@@ -850,7 +863,6 @@ export default function HomePage() {
   const [homeLink, setHomeLink] = useState("");
 
   const [activeRecording, setActiveRecording] = useState<SectionKey | null>(null);
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -1604,12 +1616,10 @@ export default function HomePage() {
         (height) => {
           document.documentElement.style.setProperty("--keyboard-height", `${height}px`);
           document.body.classList.add("keyboard-open");
-          setIsInputFocused(true);
         },
         () => {
           document.documentElement.style.setProperty("--keyboard-height", "0px");
           document.body.classList.remove("keyboard-open");
-          setIsInputFocused(false);
         }
       ).then((fn) => { cleanup = fn; });
     });
@@ -3338,6 +3348,7 @@ const saveUserProfileSettings = async () => {
         <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
           <HomeLogo />
           <p className="mt-4 text-sm font-bold text-slate-700">טוען התחברות...</p>
+          <LoadingBar done={isAuthReady} />
         </section>
       </main>
     );
@@ -3577,6 +3588,7 @@ const saveUserProfileSettings = async () => {
             <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
             <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
             <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
+            <LoadingBar />
             {houseMembers.length > 0 && (
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {houseMembers.slice(0, 4).map((member) => (
@@ -3933,8 +3945,6 @@ const saveUserProfileSettings = async () => {
                         }}
                         value={inputs[key]}
                         onChange={(event) => setInputs((prev) => ({ ...prev, [key]: event.target.value }))}
-                        onFocus={() => setIsInputFocused(true)}
-                        onBlur={() => setIsInputFocused(false)}
                         placeholder={section.placeholder}
                         className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                       />
@@ -4093,7 +4103,7 @@ const saveUserProfileSettings = async () => {
       </div>
 
       {isMobile && (
-        <nav className={`fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2 transition-all duration-300 ${isInputFocused || activeRecording ? "translate-y-full opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}`}>
+        <nav className={`bottom-nav fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2 ${activeRecording ? "translate-y-full opacity-0 pointer-events-none" : ""}`}>
           <div className="mx-auto w-full max-w-[min(100vw-0.7rem,24.5rem)] rounded-t-[2.1rem] rounded-b-[1.45rem] border border-white/70 bg-white/70 p-2 shadow-xl shadow-slate-200/70 backdrop-blur-xl">
             <div className="mx-auto mb-1 h-1.5 w-20 rounded-full bg-slate-200/65" />
             <div className="flex items-center justify-between rounded-[1.8rem] border border-white/60 bg-white/45 px-1 py-1.5">
