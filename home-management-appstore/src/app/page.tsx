@@ -2100,11 +2100,18 @@ const saveUserProfileSettings = async () => {
     setIsSavingUserProfile(true);
     setUserProfileError("");
 
+    // Upload avatar to Storage if it's still a base64 preview (same pattern as house image save).
+    const finalAvatarUrl = await uploadImageToStorage(
+      userProfileImage.trim(),
+      `avatars/${activeUser.id}.jpg`,
+    );
+    if (finalAvatarUrl !== userProfileImage) setUserProfileImage(finalAvatarUrl);
+
     const { error } = await client
       .from("app_users")
       .update({
         display_name: nextName,
-        avatar_url: userProfileImage.trim(),
+        avatar_url: finalAvatarUrl,
       })
       .eq("id", activeUser.id);
 
@@ -2119,7 +2126,7 @@ const saveUserProfileSettings = async () => {
         ? {
             ...prev,
             display_name: nextName,
-            avatar_url: userProfileImage.trim(),
+            avatar_url: finalAvatarUrl,
           }
         : prev,
     );
@@ -2127,7 +2134,7 @@ const saveUserProfileSettings = async () => {
     setHouseMembers((prev) =>
       prev.map((member) =>
         member.id === activeUser.id
-          ? { ...member, display_name: nextName, avatar_url: userProfileImage.trim() }
+          ? { ...member, display_name: nextName, avatar_url: finalAvatarUrl }
           : member,
       ),
     );
