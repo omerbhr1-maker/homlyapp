@@ -69,10 +69,6 @@ type CloudUserRow = {
   auth_user_id?: string | null;
 };
 
-type CloudInviteRow = {
-  token: string;
-  house_id: string;
-};
 
 type InviteLookupByEmail = {
   app_user_id: string;
@@ -790,6 +786,11 @@ export default function HomePage() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setAuthTimedOut(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
   const [isAuthResolving, setIsAuthResolving] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
@@ -1034,7 +1035,10 @@ export default function HomePage() {
 
   useEffect(() => {
     const client = supabase;
-    if (!client) return;
+    if (!client) {
+      setIsAuthReady(true);
+      return;
+    }
     let cancelled = false;
     const userSelect = "id,username,display_name,avatar_url,auth_user_id";
     const clearAuthState = () => {
@@ -1183,6 +1187,14 @@ export default function HomePage() {
       setIsAuthResolving(false);
     };
 
+    const authTimeoutId = setTimeout(() => {
+      if (!cancelled) {
+        initialSessionResolvedRef.current = true;
+        setIsAuthReady(true);
+        setIsAuthResolving(false);
+      }
+    }, 5000);
+
     void client.auth
       .getSession()
       .then(async ({ data }) => {
@@ -1192,6 +1204,7 @@ export default function HomePage() {
         });
       })
       .finally(() => {
+        clearTimeout(authTimeoutId);
         initialSessionResolvedRef.current = true;
         if (!cancelled) setIsAuthReady(true);
       });
@@ -1235,6 +1248,7 @@ export default function HomePage() {
 
     return () => {
       cancelled = true;
+      clearTimeout(authTimeoutId);
       subscription.unsubscribe();
     };
     // loadUserHouses is intentionally captured once for initial auth bootstrap.
@@ -3236,13 +3250,16 @@ const saveUserProfileSettings = async () => {
     );
   }
 
-  if ((!isAuthReady || isAuthResolving) && !activeUser) {
+  if ((!isAuthReady || isAuthResolving) && !activeUser && !authTimedOut) {
     return (
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+      <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center justify-center px-4">
+        <div className="flex flex-col items-center gap-4">
           <HomeLogo />
-          <p className="mt-4 text-sm font-bold text-slate-700">טוען התחברות...</p>
-        </section>
+          <svg className="h-8 w-8 animate-spin text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </div>
       </main>
     );
   }
@@ -3475,36 +3492,14 @@ const saveUserProfileSettings = async () => {
   if (!activeHouse) {
     if (isHouseLoading) {
       return (
-        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-          <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center justify-center px-4">
+          <div className="flex flex-col items-center gap-4">
             <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
-            <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
-            <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
-            {houseMembers.length > 0 && (
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {houseMembers.slice(0, 4).map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
-                  >
-                    <SafeImage
-                      src={member.avatar_url}
-                      alt={member.display_name}
-                      width={28}
-                      height={28}
-                      className="h-7 w-7 rounded-xl object-cover"
-                      fallback={
-                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                          {member.display_name.slice(0, 1)}
-                        </span>
-                      }
-                    />
-                    <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+            <svg className="h-8 w-8 animate-spin text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
         </main>
       );
     }
