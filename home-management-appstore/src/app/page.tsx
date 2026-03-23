@@ -465,6 +465,29 @@ function HomeLogo({ houseName, houseImage }: { houseName?: string; houseImage?: 
   );
 }
 
+function AudioWaveIcon() {
+  return (
+    <svg viewBox="0 0 20 16" className="h-4 w-5" fill="currentColor" aria-hidden="true">
+      <rect x="1" y="6" width="2.5" height="4" rx="1.25">
+        <animate attributeName="height" values="4;10;4" dur="0.7s" repeatCount="indefinite" begin="0s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+        <animate attributeName="y" values="6;3;6" dur="0.7s" repeatCount="indefinite" begin="0s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+      </rect>
+      <rect x="5.5" y="4" width="2.5" height="8" rx="1.25">
+        <animate attributeName="height" values="8;14;8" dur="0.7s" repeatCount="indefinite" begin="0.15s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+        <animate attributeName="y" values="4;1;4" dur="0.7s" repeatCount="indefinite" begin="0.15s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+      </rect>
+      <rect x="10" y="2" width="2.5" height="12" rx="1.25">
+        <animate attributeName="height" values="12;16;12" dur="0.7s" repeatCount="indefinite" begin="0.3s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+        <animate attributeName="y" values="2;0;2" dur="0.7s" repeatCount="indefinite" begin="0.3s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+      </rect>
+      <rect x="14.5" y="4" width="2.5" height="8" rx="1.25">
+        <animate attributeName="height" values="8;14;8" dur="0.7s" repeatCount="indefinite" begin="0.45s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+        <animate attributeName="y" values="4;1;4" dur="0.7s" repeatCount="indefinite" begin="0.45s" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+      </rect>
+    </svg>
+  );
+}
+
 function MicIcon() {
   return (
     <svg
@@ -819,6 +842,7 @@ export default function HomePage() {
   const [homeLink, setHomeLink] = useState("");
 
   const [activeRecording, setActiveRecording] = useState<SectionKey | null>(null);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -3899,6 +3923,8 @@ const saveUserProfileSettings = async () => {
                         }}
                         value={inputs[key]}
                         onChange={(event) => setInputs((prev) => ({ ...prev, [key]: event.target.value }))}
+                        onFocus={() => setIsInputFocused(true)}
+                        onBlur={() => setIsInputFocused(false)}
                         placeholder={section.placeholder}
                         className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                       />
@@ -3928,7 +3954,7 @@ const saveUserProfileSettings = async () => {
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                         } ${!isSpeechSupported ? "pointer-events-none opacity-40" : ""}`}
                       >
-                        <MicIcon />
+                        {isRecordingHere ? <AudioWaveIcon /> : <MicIcon />}
                       </button>
                     </div>
                     <button type="submit" className="min-h-11 rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 px-4 py-2 text-sm font-bold text-white transition hover:opacity-90">הוספה</button>
@@ -4057,7 +4083,7 @@ const saveUserProfileSettings = async () => {
       </div>
 
       {isMobile && (
-        <nav className="fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2">
+        <nav className={`fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2 transition-all duration-300 ${isInputFocused || activeRecording ? "translate-y-full opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}`}>
           <div className="mx-auto w-full max-w-[min(100vw-0.7rem,24.5rem)] rounded-t-[2.1rem] rounded-b-[1.45rem] border border-white/70 bg-white/70 p-2 shadow-xl shadow-slate-200/70 backdrop-blur-xl">
             <div className="mx-auto mb-1 h-1.5 w-20 rounded-full bg-slate-200/65" />
             <div className="flex items-center justify-between rounded-[1.8rem] border border-white/60 bg-white/45 px-1 py-1.5">
