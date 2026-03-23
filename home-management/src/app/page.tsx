@@ -272,12 +272,6 @@ function getPublicAppOrigin() {
   return "https://home-management-hebrew.pages.dev";
 }
 
-function getAiApiUrl(path: string) {
-  if (typeof window === "undefined") return path;
-  const protocol = window.location.protocol;
-  const isNativeShell = protocol === "capacitor:" || protocol === "ionic:" || window.location.origin === "null";
-  return isNativeShell ? `${getPublicAppOrigin()}${path}` : path;
-}
 
 function sanitizeCachedImage(value?: string) {
   const nextValue = String(value || "").trim();
@@ -1653,26 +1647,15 @@ export default function HomePage() {
     const fallbackItems = () => sanitizeItems(splitTranscriptToItems(text));
 
     try {
-      // Native iOS bundles don't contain Next API routes locally, so they call the deployed origin.
-      const response = await fetch(getAiApiUrl("/api/ai/parse-recording"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sectionKey,
-          text,
-        }),
+      const client = supabase;
+      if (!client) return fallbackItems();
+      const { data, error } = await client.functions.invoke("ai-parse-recording", {
+        body: { sectionKey, text },
       });
-
-      if (!response.ok) return fallbackItems();
-
-      const data = (await response.json()) as { items?: string[] };
-      if (!Array.isArray(data.items) || data.items.length === 0) {
-        return fallbackItems();
-      }
-
-      return sanitizeItems(data.items);
+      if (error || !data) return fallbackItems();
+      const parsed = data as { items?: string[] };
+      if (!Array.isArray(parsed.items) || parsed.items.length === 0) return fallbackItems();
+      return sanitizeItems(parsed.items);
     } catch {
       return fallbackItems();
     }
@@ -2454,29 +2437,26 @@ const saveUserProfileSettings = async () => {
     };
 
     try {
-      const response = await fetch(getAiApiUrl("/api/ai/recipe"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recipeText,
-          answers: recipeAnswers,
-        }),
-      });
-
-      if (!response.ok) {
+      const client = supabase;
+      if (!client) {
         runRecipeFallback();
-        setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
+        setIsRecipeLoading(false);
         return;
       }
-
-      const parsed = (await response.json()) as RecipeAiResponse;
+      const { data, error } = await client.functions.invoke("ai-recipe", {
+        body: { recipeText, answers: recipeAnswers },
+      });
+      if (error || !data) {
+        runRecipeFallback();
+        setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
+        setIsRecipeLoading(false);
+        return;
+      }
+      const parsed = data as RecipeAiResponse;
       const successFromApi = applyParsedRecipeResult(parsed);
       if (!successFromApi) {
         runRecipeFallback();
         setRecipeError("לא התקבלו רכיבים מספקים, עברתי למצב חלופי.");
-        return;
       }
     } catch {
       runRecipeFallback();
