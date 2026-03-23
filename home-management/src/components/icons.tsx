@@ -1,29 +1,8 @@
 export function AudioWaveIcon() {
-  const bars: [string, string][] = [
-    ["35%", "0s"],
-    ["65%", "0.15s"],
-    ["90%", "0.3s"],
-    ["65%", "0.45s"],
-  ];
   return (
-    <span
-      aria-hidden="true"
-      style={{ display: "inline-flex", alignItems: "center", gap: "2px", width: "18px", height: "16px" }}
-    >
-      {bars.map(([h, delay], i) => (
-        <span
-          key={i}
-          style={{
-            display: "block",
-            width: "3px",
-            height: h,
-            borderRadius: "2px",
-            backgroundColor: "currentColor",
-            transformOrigin: "center",
-            animation: `audioWaveBar 0.7s ease-in-out infinite`,
-            animationDelay: delay,
-          }}
-        />
+    <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "flex-end", gap: "2px", width: "18px", height: "16px" }}>
+      {(["6px","11px","14px","11px"] as const).map((h, i) => (
+        <span key={i} style={{ display: "block", width: "3px", height: h, borderRadius: "2px", backgroundColor: "currentColor", transformOrigin: "bottom", animation: "audioWaveBar 0.7s ease-in-out infinite", animationDelay: `${i * 0.15}s` }} />
       ))}
     </span>
   );
