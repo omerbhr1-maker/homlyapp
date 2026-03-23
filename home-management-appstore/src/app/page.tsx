@@ -1,11 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
-import { RecipeModal } from "@/components/RecipeModal";
-import { InviteModal } from "@/components/InviteModal";
-import { SettingsModal } from "@/components/SettingsModal";
 import {
   DndContext,
   DragEndEvent,
@@ -27,6 +24,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { appCacheStorage, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
+
+const RecipeModal = lazy(() => import("@/components/RecipeModal").then((m) => ({ default: m.RecipeModal })));
+const InviteModal = lazy(() => import("@/components/InviteModal").then((m) => ({ default: m.InviteModal })));
+const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
 type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
 
@@ -68,7 +69,6 @@ type CloudUserRow = {
   avatar_url: string;
   auth_user_id?: string | null;
 };
-
 
 type InviteLookupByEmail = {
   app_user_id: string;
@@ -780,11 +780,6 @@ export default function HomePage() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [authTimedOut, setAuthTimedOut] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setAuthTimedOut(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
   const [isAuthResolving, setIsAuthResolving] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
@@ -797,6 +792,7 @@ export default function HomePage() {
   const [userProfileImage, setUserProfileImage] = useState("");
   const [isSavingUserProfile, setIsSavingUserProfile] = useState(false);
   const [userProfileError, setUserProfileError] = useState("");
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [desktopQuery, setDesktopQuery] = useState("");
   const [desktopFilter, setDesktopFilter] = useState<"all" | "open" | "done">("all");
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -870,10 +866,14 @@ export default function HomePage() {
   // True from the moment the user makes a local change until the save completes.
   // Blocks real-time / loadUserHouses from overwriting unsaved local state.
   const hasPendingLocalChangesRef = useRef(false);
+  // When true, the sections useEffect saves immediately (0ms delay) instead of debouncing.
+  const saveImmediatelyRef = useRef(false);
   // Incremented every time applyActiveHouse runs — lets the save effect
   // distinguish "triggered by cloud data" from "triggered by user action".
   const cloudApplyVersionRef = useRef(0);
   const lastSeenCloudVersionRef = useRef(0);
+  // Tracks the updated_at of the last cloud snapshot we accepted.
+  // Realtime events older than this are stale echoes and are discarded.
   const lastAcceptedCloudUpdatedAtRef = useRef("");
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
@@ -1029,10 +1029,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const client = supabase;
-    if (!client) {
-      setIsAuthReady(true);
-      return;
-    }
+    if (!client) return;
     let cancelled = false;
     const userSelect = "id,username,display_name,avatar_url,auth_user_id";
     const clearAuthState = () => {
@@ -1181,14 +1178,6 @@ export default function HomePage() {
       setIsAuthResolving(false);
     };
 
-    const authTimeoutId = setTimeout(() => {
-      if (!cancelled) {
-        initialSessionResolvedRef.current = true;
-        setIsAuthReady(true);
-        setIsAuthResolving(false);
-      }
-    }, 5000);
-
     void client.auth
       .getSession()
       .then(async ({ data }) => {
@@ -1198,7 +1187,6 @@ export default function HomePage() {
         });
       })
       .finally(() => {
-        clearTimeout(authTimeoutId);
         initialSessionResolvedRef.current = true;
         if (!cancelled) setIsAuthReady(true);
       });
@@ -1242,7 +1230,6 @@ export default function HomePage() {
 
     return () => {
       cancelled = true;
-      clearTimeout(authTimeoutId);
       subscription.unsubscribe();
     };
     // loadUserHouses is intentionally captured once for initial auth bootstrap.
@@ -1274,6 +1261,9 @@ export default function HomePage() {
 
     // User made a local change — protect state from being overwritten.
     hasPendingLocalChangesRef.current = true;
+
+    const delay = saveImmediatelyRef.current ? 0 : 500;
+    saveImmediatelyRef.current = false;
 
     const timeout = setTimeout(async () => {
       const house = activeHouseRef.current;
@@ -1318,7 +1308,7 @@ export default function HomePage() {
           supermarketShopping: sections.supermarketShopping.items,
         }),
       );
-    }, 500);
+    }, delay);
 
     return () => {
       clearTimeout(timeout);
@@ -1471,6 +1461,9 @@ export default function HomePage() {
                 : (currentHouse?.owner_user_id ?? null),
             updated_at: typeof next.updated_at === "string" ? next.updated_at : currentHouse?.updated_at,
           };
+          // Discard stale echoes: if the incoming event's updated_at is older than
+          // (or equal to) the last snapshot we accepted, it's an out-of-order echo
+          // from a previous save and must not overwrite local state.
           if (
             syncedHouse.updated_at &&
             lastAcceptedCloudUpdatedAtRef.current &&
@@ -1860,16 +1853,28 @@ export default function HomePage() {
   const toggleComplete = (key: SectionKey, id: number) => {
     const isCompleting = !sections[key].items.find((i) => i.id === id)?.completed;
     if (isCompleting) void hapticNotificationSuccess(); else void hapticLight();
+    saveImmediatelyRef.current = true;
     pushUndoState("עודכן פריט");
-    setSections((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        items: prev[key].items.map((item) =>
-          item.id === id ? { ...item, completed: !item.completed } : item,
-        ),
-      },
-    }));
+    setSections((prev) => {
+      const next = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          items: prev[key].items.map((item) =>
+            item.id === id ? { ...item, completed: !item.completed } : item,
+          ),
+        },
+      };
+      if (activeHouseRef.current) {
+        try {
+          window.localStorage.setItem(
+            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
+            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
+          );
+        } catch {}
+      }
+      return next;
+    });
   };
 
   const editItem = (key: SectionKey, id: number) => {
@@ -1894,14 +1899,26 @@ export default function HomePage() {
 
   const deleteItem = (key: SectionKey, id: number) => {
     void hapticHeavy();
+    saveImmediatelyRef.current = true;
     pushUndoState("נמחק פריט");
-    setSections((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        items: prev[key].items.filter((item) => item.id !== id),
-      },
-    }));
+    setSections((prev) => {
+      const next = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          items: prev[key].items.filter((item) => item.id !== id),
+        },
+      };
+      if (activeHouseRef.current) {
+        try {
+          window.localStorage.setItem(
+            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
+            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
+          );
+        } catch {}
+      }
+      return next;
+    });
   };
 
   const getVisibleItems = (items: Item[]) =>
@@ -2027,13 +2044,35 @@ export default function HomePage() {
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(objectUrl);
 
-      const optimized = canvas.toDataURL("image/jpeg", quality);
-      return optimized || fallback;
+      // Try progressively lower quality until under 200KB (~267K base64 chars).
+      const MAX_CHARS = 270_000;
+      let optimized = canvas.toDataURL("image/jpeg", quality);
+      if (optimized.length > MAX_CHARS) {
+        optimized = canvas.toDataURL("image/jpeg", 0.65);
+      }
+      if (optimized.length > MAX_CHARS) {
+        optimized = canvas.toDataURL("image/jpeg", 0.45);
+      }
+      // Still too large — try at half the size.
+      if (optimized.length > MAX_CHARS && canvas.width > 320) {
+        const small = document.createElement("canvas");
+        small.width = Math.round(canvas.width / 2);
+        small.height = Math.round(canvas.height / 2);
+        small.getContext("2d")?.drawImage(canvas, 0, 0, small.width, small.height);
+        optimized = small.toDataURL("image/jpeg", 0.6);
+      }
+      if (!optimized || optimized.length > MAX_CHARS) return "";
+      return optimized;
     } catch {
+      // Fallback (original file) — only if within size limit.
+      if (fallback.length > 270_000) return "";
       return fallback;
     }
   };
 
+  // Uploads a base64 data-URL to Supabase Storage and returns the public URL.
+  // Falls back to the original base64 value if the upload fails, so callers
+  // always get a usable image string regardless of network state.
   const uploadImageToStorage = async (base64: string, path: string): Promise<string> => {
     const client = supabase;
     if (!client || !base64.startsWith("data:")) return base64;
@@ -2057,14 +2096,27 @@ export default function HomePage() {
 
   const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
+    setSettingsError("");
     const value = await optimizeImageFile(file, 1280, 0.8);
-    if (value) setSettingsHouseImage(value);
+    setIsProcessingImage(false);
+    if (!value) {
+      setSettingsError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      return;
+    }
+    setSettingsHouseImage(value);
   };
 
   const handleUserAvatarFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
     const value = await optimizeImageFile(file, 640, 0.82);
-    if (value) setUserAvatarInput(value);
+    setIsProcessingImage(false);
+    if (!value) {
+      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      return;
+    }
+    setUserAvatarInput(value);
   };
 
   const openUserAvatarPicker = () => {
@@ -2073,14 +2125,23 @@ export default function HomePage() {
 
   const handleUserProfileImageFile = async (file?: File) => {
     if (!file) return;
+    setIsProcessingImage(true);
+    setUserProfileError("");
     const base64 = await optimizeImageFile(file, 640, 0.82);
-    if (!base64) return;
-    setUserProfileImage(base64); // instant preview
+    if (!base64) {
+      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      setIsProcessingImage(false);
+      return;
+    }
+    // Show preview immediately — no flash waiting for upload.
+    setUserProfileImage(base64);
+    // Upload to Storage in the background; replace base64 with the stable URL.
     const userId = activeUser?.id;
     if (userId) {
       const url = await uploadImageToStorage(base64, `avatars/${userId}.jpg`);
       setUserProfileImage(url);
     }
+    setIsProcessingImage(false);
   };
 
   const openUserProfileImagePicker = () => {
@@ -2202,11 +2263,13 @@ const saveUserProfileSettings = async () => {
       return;
     }
 
+    // Upload house image to Storage if it's still a base64 preview.
     const finalHouseImage = await uploadImageToStorage(
       settingsHouseImage.trim(),
       `houses/${activeHouse.id}.jpg`,
     );
 
+    // Persist name + image to DB immediately (don't rely on the sections save effect).
     const { error: updateError } = await client
       .from("houses")
       .update({ name: nextName, house_image: finalHouseImage })
@@ -2219,16 +2282,9 @@ const saveUserProfileSettings = async () => {
     }
 
     setActiveHouse((prev) =>
-      prev
-        ? {
-            ...prev,
-            name: nextName,
-            house_image: finalHouseImage,
-          }
-        : prev,
+      prev ? { ...prev, name: nextName, house_image: finalHouseImage } : prev,
     );
     setSettingsHouseImage(finalHouseImage);
-
     setIsSavingSettings(false);
     setIsSettingsOpen(false);
   };
@@ -2687,6 +2743,7 @@ const saveUserProfileSettings = async () => {
     }
 
     const authUserId = signInData.user.id;
+    // User is now authenticated — upload avatar to Storage if it's a base64 preview.
     const finalAvatarUrl = await uploadImageToStorage(avatarUrl, `avatars/${authUserId}.jpg`);
     const { data: insertedUser, error: insertError } = await client
       .from("app_users")
@@ -3241,16 +3298,13 @@ const saveUserProfileSettings = async () => {
     );
   }
 
-  if ((!isAuthReady || isAuthResolving) && !activeUser && !authTimedOut) {
+  if ((!isAuthReady || isAuthResolving) && !activeUser) {
     return (
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center justify-center px-4">
-        <div className="flex flex-col items-center gap-4">
+      <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
+        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
           <HomeLogo />
-          <svg className="h-8 w-8 animate-spin text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        </div>
+          <p className="mt-4 text-sm font-bold text-slate-700">טוען התחברות...</p>
+        </section>
       </main>
     );
   }
@@ -3366,9 +3420,10 @@ const saveUserProfileSettings = async () => {
                     <button
                       type="button"
                       onClick={openUserAvatarPicker}
-                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100"
+                      disabled={isProcessingImage}
+                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                     >
-                      העלאת תמונה
+                      {isProcessingImage ? "מעבד תמונה..." : "העלאת תמונה"}
                     </button>
                     {userAvatarInput && (
                       <button
@@ -3483,14 +3538,36 @@ const saveUserProfileSettings = async () => {
   if (!activeHouse) {
     if (isHouseLoading) {
       return (
-        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center justify-center px-4">
-          <div className="flex flex-col items-center gap-4">
+        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
+          <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
             <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
-            <svg className="h-8 w-8 animate-spin text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
+            <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
+            <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
+            {houseMembers.length > 0 && (
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {houseMembers.slice(0, 4).map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  >
+                    <SafeImage
+                      src={member.avatar_url}
+                      alt={member.display_name}
+                      width={28}
+                      height={28}
+                      className="h-7 w-7 rounded-xl object-cover"
+                      fallback={
+                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                          {member.display_name.slice(0, 1)}
+                        </span>
+                      }
+                    />
+                    <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </main>
       );
     }
@@ -3933,7 +4010,7 @@ const saveUserProfileSettings = async () => {
         </DndContext>
 
           {isRecipeModalOpen && (
-            <RecipeModal
+            <Suspense fallback={null}><RecipeModal
               recipeText={recipeText}
               onRecipeTextChange={setRecipeText}
               recipeQuestions={recipeQuestions}
@@ -3955,11 +4032,11 @@ const saveUserProfileSettings = async () => {
                 setRecipeRecording(false);
                 recipeRecognitionRef.current?.stop();
               }}
-            />
+            /></Suspense>
           )}
 
           {isInviteModalOpen && (
-            <InviteModal
+            <Suspense fallback={null}><InviteModal
               invitePhone={invitePhone}
               onInvitePhoneChange={setInvitePhone}
               inviteIdentifierInput={inviteIdentifierInput}
@@ -3975,7 +4052,7 @@ const saveUserProfileSettings = async () => {
               onShareLink={() => void shareInviteLink()}
               onCopyLink={() => void copyInviteLink()}
               onClose={() => setIsInviteModalOpen(false)}
-            />
+            /></Suspense>
           )}
       </div>
 
@@ -4060,8 +4137,9 @@ const saveUserProfileSettings = async () => {
                 <button
                   type="button"
                   onClick={openUserProfileImagePicker}
-                  className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg"
-                  title="החלפת תמונה"
+                  disabled={isProcessingImage}
+                  className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg disabled:opacity-50"
+                  title={isProcessingImage ? "מעבד תמונה..." : "החלפת תמונה"}
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -4117,7 +4195,7 @@ const saveUserProfileSettings = async () => {
       )}
 
       {isSettingsOpen && (
-        <SettingsModal
+        <Suspense fallback={null}><SettingsModal
           settingsHouseName={settingsHouseName}
           onSettingsHouseNameChange={setSettingsHouseName}
           settingsHouseImage={settingsHouseImage}
@@ -4165,7 +4243,7 @@ const saveUserProfileSettings = async () => {
             setUserAvatarInput("");
           }}
           onLeaveHouse={() => void leaveHouse()}
-        />
+        /></Suspense>
       )}
     </main>
   );

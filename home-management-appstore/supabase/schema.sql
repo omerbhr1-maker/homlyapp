@@ -326,6 +326,32 @@ using (
   or user_id = public.current_app_user_id()
 );
 
+-- Storage bucket for user avatars and house images.
+-- Files are public (read by anyone, write requires auth).
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('homly-images', 'homly-images', true, 5242880)
+on conflict (id) do nothing;
+
+drop policy if exists "homly_images_select" on storage.objects;
+create policy "homly_images_select"
+on storage.objects for select
+using (bucket_id = 'homly-images');
+
+drop policy if exists "homly_images_insert" on storage.objects;
+create policy "homly_images_insert"
+on storage.objects for insert
+with check (bucket_id = 'homly-images' and auth.uid() is not null);
+
+drop policy if exists "homly_images_update" on storage.objects;
+create policy "homly_images_update"
+on storage.objects for update
+using (bucket_id = 'homly-images' and auth.uid() is not null);
+
+drop policy if exists "homly_images_delete" on storage.objects;
+create policy "homly_images_delete"
+on storage.objects for delete
+using (bucket_id = 'homly-images' and auth.uid() is not null);
+
 -- Enable Supabase Realtime for live sync between users.
 -- Without this, postgres_changes subscriptions receive no events.
 alter publication supabase_realtime add table public.houses;

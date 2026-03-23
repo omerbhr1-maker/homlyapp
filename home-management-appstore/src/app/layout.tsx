@@ -43,7 +43,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
-      <body className="antialiased overscroll-none">
+      <body className="antialiased">
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
