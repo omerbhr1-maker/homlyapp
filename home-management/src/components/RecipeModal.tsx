@@ -1,6 +1,6 @@
 "use client";
 
-import { MicIcon } from "@/components/icons";
+import { MicIcon, AudioWaveIcon } from "@/components/icons";
 import {
   getRecipeQuestionKind,
   getRecipeAnswerValues,
@@ -72,9 +72,12 @@ export function RecipeModal({
             } transition`}
             title={recipeRecording ? "עצור הקלטה" : "הקלטת מתכון"}
           >
-            <MicIcon />
+            {recipeRecording ? <AudioWaveIcon /> : <MicIcon />}
           </button>
         </div>
+        {recipeRecording && (
+          <p className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600">מקליט... לעצירת ההקלטה לחץ שוב.</p>
+        )}
 
         {recipeQuestions.length > 0 && (
           <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
