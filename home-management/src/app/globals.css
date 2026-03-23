@@ -99,6 +99,12 @@ body.keyboard-open {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* audio wave animation — for mic recording button */
+@keyframes audioWaveBar {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
 /* swipe-to-delete — CSS בסיסי */
 .swipe-item {
   position: relative;
