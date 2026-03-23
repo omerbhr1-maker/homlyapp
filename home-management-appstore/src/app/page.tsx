@@ -1427,14 +1427,14 @@ export default function HomePage() {
       if (fallbackInterval) return;
       const userId = activeUserRef.current?.id;
       if (userId) {
-        void loadUserHouses(userId, houseId);
+        void loadUserHouses(userId, houseId, true);
       }
       fallbackInterval = setInterval(() => {
         const uid = activeUserRef.current?.id;
         if (uid) {
-          void loadUserHouses(uid, houseId);
+          void loadUserHouses(uid, houseId, true);
         }
-      }, 5000);
+      }, 30000);
     };
 
     const stopFallbackSync = () => {
@@ -2551,11 +2551,11 @@ const saveUserProfileSettings = async () => {
     setIsHouseMembersLoading(false);
   };
 
-  const loadUserHouses = async (userId: string, preferredHouseId?: string) => {
+  const loadUserHouses = async (userId: string, preferredHouseId?: string, silent?: boolean) => {
     const client = supabase;
     if (!client) return;
     const requestId = ++housesLoadRequestRef.current;
-    setIsHouseLoading(true);
+    if (!silent) setIsHouseLoading(true);
 
     const { data: membershipData, error: membershipError } = await client
       .from("house_members")
@@ -2565,13 +2565,15 @@ const saveUserProfileSettings = async () => {
     if (requestId !== housesLoadRequestRef.current) return;
 
     if (membershipError || !membershipData || membershipData.length === 0) {
-      setMemberHouses([]);
-      setActiveHouse(null);
-      setHouseMembers([]);
-      if (typeof window !== "undefined") {
-        void removePersistentCacheValue(getSelectedHouseStorageKey(userId));
+      if (!silent) {
+        setMemberHouses([]);
+        setActiveHouse(null);
+        setHouseMembers([]);
+        if (typeof window !== "undefined") {
+          void removePersistentCacheValue(getSelectedHouseStorageKey(userId));
+        }
+        setIsHouseLoading(false);
       }
-      setIsHouseLoading(false);
       return;
     }
 
@@ -2585,8 +2587,10 @@ const saveUserProfileSettings = async () => {
     if (requestId !== housesLoadRequestRef.current) return;
 
     if (housesError || !housesData) {
-      setHouseListError("לא הצלחתי לטעון את הבתים שלך.");
-      setIsHouseLoading(false);
+      if (!silent) {
+        setHouseListError("לא הצלחתי לטעון את הבתים שלך.");
+        setIsHouseLoading(false);
+      }
       return;
     }
 
@@ -2609,15 +2613,15 @@ const saveUserProfileSettings = async () => {
         (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
         activeHouse?.id === nextHouse.id
       ) {
-        setIsHouseLoading(false);
+        if (!silent) setIsHouseLoading(false);
         return;
       }
       applyActiveHouse(nextHouse);
-      void loadHouseMembers(nextHouse.id);
+      if (!silent) void loadHouseMembers(nextHouse.id);
     } else {
-      setActiveHouse(null);
+      if (!silent) setActiveHouse(null);
     }
-    setIsHouseLoading(false);
+    if (!silent) setIsHouseLoading(false);
   };
 
   const handleCreateUser = async () => {
