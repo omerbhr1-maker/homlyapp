@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { HomeLogo } from "@/components/HomeLogo";
 import { SafeImage } from "@/components/SafeImage";
 import type { CloudHouseRow, CloudUserRow } from "@/types";
@@ -11,7 +12,7 @@ type HouseHeaderProps = {
   onOpenSettings: () => void;
 };
 
-export function HouseHeader({
+export const HouseHeader = memo(function HouseHeader({
   activeHouse,
   activeUser,
   onOpenUserProfile,
@@ -65,4 +66,4 @@ export function HouseHeader({
       </div>
     </header>
   );
-}
+});

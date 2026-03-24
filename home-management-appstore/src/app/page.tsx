@@ -731,14 +731,14 @@ export default function HomePage() {
     setSettingsHouseName(activeHouse.name);
     setSettingsHouseImage(activeHouse.house_image || "");
     setSettingsError("");
-  }, [isSettingsOpen, activeHouse]);
+  }, [isSettingsOpen, activeHouse?.id, activeHouse?.name, activeHouse?.house_image]);
 
   useEffect(() => {
     if (!isUserProfileOpen || !activeUser) return;
     setUserProfileName(activeUser.display_name || "");
     setUserProfileImage(activeUser.avatar_url || "");
     setUserProfileError("");
-  }, [isUserProfileOpen, activeUser]);
+  }, [isUserProfileOpen, activeUser?.id, activeUser?.display_name, activeUser?.avatar_url]);
 
   useEffect(() => {
     if (!isRecipeModalOpen) return;
@@ -992,11 +992,6 @@ export default function HomePage() {
     });
     return () => { cleanup?.(); };
   }, []);
-
-  useEffect(() => {
-    setInviteToken("");
-    setInviteFeedback("");
-  }, [activeHouse?.id]);
 
   useEffect(() => {
     return () => {
@@ -1343,6 +1338,11 @@ export default function HomePage() {
     setRecipeRecording(false);
     recipeRecognitionRef.current?.stop();
   }, []);
+
+  const handleOpenUserProfile = useCallback(() => setIsUserProfileOpen(true), []);
+  const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const handleCloseUserProfile = useCallback(() => setIsUserProfileOpen(false), []);
+  const handleCloseSettings = useCallback(() => setIsSettingsOpen(false), []);
 
   const reorderWithinSection = (
     key: SectionKey,
@@ -2420,8 +2420,10 @@ const saveUserProfileSettings = async () => {
     }
   };
 
-  const openInviteModal = async () => {
+  const openInviteModal = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
 
     setInviteFeedback("");
@@ -2460,7 +2462,7 @@ const saveUserProfileSettings = async () => {
       return;
     }
     setInviteToken(createdToken);
-  };
+  }, []);
 
   const normalizedPhone = invitePhone.replace(/[^\d+]/g, "");
   const inviteLink = (() => {
@@ -2711,15 +2713,15 @@ const saveUserProfileSettings = async () => {
       <HouseHeader
         activeHouse={activeHouse}
         activeUser={activeUser}
-        onOpenUserProfile={() => setIsUserProfileOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenUserProfile={handleOpenUserProfile}
+        onOpenSettings={handleOpenSettings}
       />
 
       <HouseMembersSection
         houseMembers={houseMembers}
         isHouseMembersLoading={isHouseMembersLoading}
         isOwner={activeHouse?.owner_user_id === activeUser?.id}
-        openInviteModal={() => void openInviteModal()}
+        openInviteModal={openInviteModal}
         removeMember={removeMember}
       />
 
@@ -2854,7 +2856,7 @@ const saveUserProfileSettings = async () => {
           openUserProfileImagePicker={openUserProfileImagePicker}
           handleUserProfileImageFile={handleUserProfileImageFile}
           userProfileImageInputRef={userProfileImageInputRef}
-          onClose={() => setIsUserProfileOpen(false)}
+          onClose={handleCloseUserProfile}
         />
       )}
 
@@ -2870,13 +2872,13 @@ const saveUserProfileSettings = async () => {
           isOwner={activeHouse?.owner_user_id === activeUser?.id}
           onSave={() => void saveHouseSettings()}
           onDelete={() => void deleteActiveHouse()}
-          onClose={() => setIsSettingsOpen(false)}
+          onClose={handleCloseSettings}
           onOpenUserProfile={() => {
-            setIsSettingsOpen(false);
-            setIsUserProfileOpen(true);
+            handleCloseSettings();
+            handleOpenUserProfile();
           }}
           onOpenInvite={() => {
-            setIsSettingsOpen(false);
+            handleCloseSettings();
             void openInviteModal();
           }}
           onSwitchHouse={() => {
