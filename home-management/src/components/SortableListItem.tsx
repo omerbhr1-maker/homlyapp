@@ -1,14 +1,18 @@
 "use client";
 
+import { memo, useCallback } from "react";
 import Image from "next/image";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { passthroughImageLoader } from "@/lib/utils";
 import type { Item } from "@/types";
 
-export function SortableListItem({
+type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
+
+export const SortableListItem = memo(function SortableListItem({
   sortableId,
   item,
+  sectionKey,
   createdByAvatarUrl,
   addedAtLabel,
   onToggle,
@@ -17,14 +21,19 @@ export function SortableListItem({
 }: {
   sortableId: string;
   item: Item;
+  sectionKey: SectionKey;
   createdByAvatarUrl?: string;
   addedAtLabel: string;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onToggle: (key: SectionKey, id: number) => void;
+  onEdit: (key: SectionKey, id: number) => void;
+  onDelete: (key: SectionKey, id: number) => void;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({ id: sortableId });
+
+  const handleToggle = useCallback(() => onToggle(sectionKey, item.id), [onToggle, sectionKey, item.id]);
+  const handleEdit = useCallback(() => onEdit(sectionKey, item.id), [onEdit, sectionKey, item.id]);
+  const handleDelete = useCallback(() => onDelete(sectionKey, item.id), [onDelete, sectionKey, item.id]);
 
   return (
     <li
@@ -61,7 +70,7 @@ export function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onToggle}
+        onClick={handleToggle}
         className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right"
       >
         <span
@@ -97,7 +106,7 @@ export function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onEdit}
+        onClick={handleEdit}
         aria-label="עריכה"
         title="עריכה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
@@ -118,7 +127,7 @@ export function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onDelete}
+        onClick={handleDelete}
         aria-label="מחיקה"
         title="מחיקה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
@@ -142,4 +151,4 @@ export function SortableListItem({
       </button>
     </li>
   );
-}
+});

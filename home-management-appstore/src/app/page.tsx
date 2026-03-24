@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
 import {
@@ -674,9 +674,10 @@ function fromSortableId(value: string): { sectionKey: SectionKey; itemId: number
   return { sectionKey: rawSectionKey as SectionKey, itemId };
 }
 
-function SortableListItem({
+const SortableListItem = memo(function SortableListItem({
   sortableId,
   item,
+  sectionKey,
   createdByAvatarUrl,
   addedAtLabel,
   onToggle,
@@ -685,16 +686,21 @@ function SortableListItem({
 }: {
   sortableId: string;
   item: Item;
+  sectionKey: SectionKey;
   createdByAvatarUrl?: string;
   addedAtLabel: string;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onToggle: (key: SectionKey, id: number) => void;
+  onEdit: (key: SectionKey, id: number) => void;
+  onDelete: (key: SectionKey, id: number) => void;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({
       id: sortableId,
     });
+
+  const handleToggle = useCallback(() => onToggle(sectionKey, item.id), [onToggle, sectionKey, item.id]);
+  const handleEdit = useCallback(() => onEdit(sectionKey, item.id), [onEdit, sectionKey, item.id]);
+  const handleDelete = useCallback(() => onDelete(sectionKey, item.id), [onDelete, sectionKey, item.id]);
 
   return (
     <li
@@ -729,7 +735,7 @@ function SortableListItem({
           <circle cx="15" cy="18" r="1" />
         </svg>
       </button>
-      <button type="button" onClick={onToggle} className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right">
+      <button type="button" onClick={handleToggle} className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right">
         <span className={`h-5 w-5 shrink-0 rounded-full border ${item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"}`} />
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-sm ${item.completed ? "text-slate-400 line-through" : "text-slate-700"}`}>{item.text}</span>
@@ -753,7 +759,7 @@ function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onEdit}
+        onClick={handleEdit}
         aria-label="עריכה"
         title="עריכה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
@@ -774,7 +780,7 @@ function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onDelete}
+        onClick={handleDelete}
         aria-label="מחיקה"
         title="מחיקה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
@@ -798,7 +804,7 @@ function SortableListItem({
       </button>
     </li>
   );
-}
+});
 
 export default function HomePage() {
   const [isMobile, setIsMobile] = useState(true);
@@ -859,6 +865,8 @@ export default function HomePage() {
   const [isHouseMembersLoading, setIsHouseMembersLoading] = useState(false);
 
   const [sections, setSections] = useState(initialSections);
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
   const [invitePhone, setInvitePhone] = useState("");
   const [homeLink, setHomeLink] = useState("");
 
@@ -869,6 +877,9 @@ export default function HomePage() {
   const ptrAtTopRef = useRef(false);
   const mainScrollRef = useRef<HTMLElement>(null);
   const PTR_THRESHOLD = 65;
+  const [isNavHidden, setIsNavHidden] = useState(false);
+  const [navDragY, setNavDragY] = useState(0);
+  const navDragStartRef = useRef(0);
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -932,6 +943,11 @@ export default function HomePage() {
         ? { delay: 180, tolerance: 6 }
         : { distance: 6 },
     }),
+  );
+
+  const houseMembersMap = useMemo(
+    () => new Map(houseMembers.map((m) => [m.id, m])),
+    [houseMembers],
   );
 
   useEffect(() => {
@@ -1322,7 +1338,7 @@ export default function HomePage() {
 
       const requestId = ++houseSaveRequestRef.current;
       isHousePersistingRef.current = true;
-      const { error } = await client
+      const { data: savedRow, error } = await client
         .from("houses")
         .update({
           name: house.name,
@@ -1334,7 +1350,9 @@ export default function HomePage() {
           invite_phone: invitePhone,
           house_image: house.house_image || "",
         })
-        .eq("id", house.id);
+        .eq("id", house.id)
+        .select("updated_at")
+        .single();
 
       if (requestId !== houseSaveRequestRef.current) return;
 
@@ -1346,6 +1364,11 @@ export default function HomePage() {
           void loadUserHouses(user.id, house.id);
         }
         return;
+      }
+
+      // Stamp the saved updated_at so that any Realtime echo of this save is discarded.
+      if (savedRow?.updated_at) {
+        lastAcceptedCloudUpdatedAtRef.current = String(savedRow.updated_at);
       }
 
       setHouseListError("");
@@ -1491,6 +1514,18 @@ export default function HomePage() {
         (payload) => {
           const next = payload.new as Partial<CloudHouseRow> | null;
           if (!next?.id) return;
+
+          // When sections is null (TOAST'd payload — row too large for WAL replication),
+          // we can't safely apply the event. If the timestamp is newer than what we've
+          // accepted, do a fresh DB fetch; otherwise discard (it's our own echo).
+          if (!next.sections) {
+            const nextUpdatedAt = typeof next.updated_at === "string" ? next.updated_at : "";
+            if (!nextUpdatedAt || nextUpdatedAt <= lastAcceptedCloudUpdatedAtRef.current) return;
+            const uid = activeUserRef.current?.id;
+            if (uid) void loadUserHouses(uid, String(next.id), true);
+            return;
+          }
+
           // Use refs for fresh values — the closure would otherwise see stale data.
           const currentHouse = activeHouseRef.current;
           const syncedHouse: CloudHouseRow = {
@@ -1498,7 +1533,7 @@ export default function HomePage() {
             name: String(next.name || currentHouse?.name || ""),
             pin: String(next.pin || currentHouse?.pin || ""),
             sections: normalizeCloudSections(
-              (next.sections as Record<SectionKey, Item[]> | undefined) || currentHouse?.sections || null,
+              next.sections as Record<SectionKey, Item[]>,
             ),
             invite_phone: String(next.invite_phone || currentHouse?.invite_phone || ""),
             house_image:
@@ -1706,16 +1741,16 @@ export default function HomePage() {
     }
   };
 
-  const pushUndoState = (label: string) => {
+  const pushUndoState = useCallback((label: string) => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setUndoState({
       label,
-      sections: cloneSections(sections),
+      sections: cloneSections(sectionsRef.current),
     });
     undoTimerRef.current = setTimeout(() => {
       setUndoState(null);
     }, 5500);
-  };
+  }, []);
 
   const restoreUndo = () => {
     if (!undoState) return;
@@ -1900,8 +1935,8 @@ export default function HomePage() {
     handleAddItem(key);
   };
 
-  const toggleComplete = (key: SectionKey, id: number) => {
-    const isCompleting = !sections[key].items.find((i) => i.id === id)?.completed;
+  const toggleComplete = useCallback((key: SectionKey, id: number) => {
+    const isCompleting = !sectionsRef.current[key].items.find((i) => i.id === id)?.completed;
     if (isCompleting) void hapticNotificationSuccess(); else void hapticLight();
     saveImmediatelyRef.current = true;
     pushUndoState("עודכן פריט");
@@ -1925,10 +1960,10 @@ export default function HomePage() {
       }
       return next;
     });
-  };
+  }, [pushUndoState]);
 
-  const editItem = (key: SectionKey, id: number) => {
-    const currentItem = sections[key].items.find((item) => item.id === id);
+  const editItem = useCallback((key: SectionKey, id: number) => {
+    const currentItem = sectionsRef.current[key].items.find((item) => item.id === id);
     if (!currentItem) return;
     const nextText = window.prompt("עריכת פריט", currentItem.text);
     if (nextText === null) return;
@@ -1945,9 +1980,9 @@ export default function HomePage() {
         ),
       },
     }));
-  };
+  }, [pushUndoState]);
 
-  const deleteItem = (key: SectionKey, id: number) => {
+  const deleteItem = useCallback((key: SectionKey, id: number) => {
     void hapticHeavy();
     saveImmediatelyRef.current = true;
     pushUndoState("נמחק פריט");
@@ -1969,7 +2004,7 @@ export default function HomePage() {
       }
       return next;
     });
-  };
+  }, [pushUndoState]);
 
   const getVisibleItems = (items: Item[]) =>
     items.filter((item) => {
@@ -2553,6 +2588,23 @@ const saveUserProfileSettings = async () => {
       setIsRefreshing(false);
     } else {
       setPtrDist(0);
+    }
+  };
+
+  const handleNavDragStart = (e: React.TouchEvent) => {
+    navDragStartRef.current = e.touches[0].clientY;
+  };
+  const handleNavDragMove = (e: React.TouchEvent) => {
+    const dy = e.touches[0].clientY - navDragStartRef.current;
+    if (dy <= 0) return;
+    setNavDragY(Math.min(dy, 130));
+  };
+  const handleNavDragEnd = () => {
+    if (navDragY >= 55) {
+      setNavDragY(0);
+      setIsNavHidden(true);
+    } else {
+      setNavDragY(0);
     }
   };
 
@@ -3762,18 +3814,39 @@ const saveUserProfileSettings = async () => {
       onTouchEnd={() => { void handlePtrEnd(); }}
     >
       {/* Pull-to-refresh indicator */}
-      {(ptrDist > 0 || isRefreshing) && (
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center transition-all duration-200"
-          style={{ paddingTop: `${isRefreshing ? 18 : Math.max(0, ptrDist - 12)}px` }}
-        >
-          <div className={`flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200 ${isRefreshing ? "animate-spin" : ""}`} style={!isRefreshing ? { rotate: `${(ptrDist / PTR_THRESHOLD) * 360}deg` } : {}}>
-            <svg viewBox="0 0 24 24" className={`h-5 w-5 ${ptrDist >= PTR_THRESHOLD ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-            </svg>
+      {(ptrDist > 0 || isRefreshing) && (() => {
+        const progress = Math.min(ptrDist / PTR_THRESHOLD, 1);
+        const r = 14;
+        const circumference = 2 * Math.PI * r;
+        const dashOffset = isRefreshing ? 0 : circumference * (1 - progress);
+        return (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center"
+            style={{ paddingTop: `${isRefreshing ? 14 : Math.max(4, ptrDist * 0.5)}px`, transition: "padding-top 0.15s" }}
+          >
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200">
+              <svg
+                viewBox="0 0 34 34"
+                className={`absolute inset-0 h-full w-full -rotate-90 ${isRefreshing ? "animate-spin" : ""}`}
+              >
+                <circle cx="17" cy="17" r={r} fill="none" stroke="#e2e8f0" strokeWidth="2" />
+                <circle
+                  cx="17" cy="17" r={r}
+                  fill="none"
+                  stroke={isRefreshing || progress >= 1 ? "#14b8a6" : "#94a3b8"}
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeDasharray={`${circumference}`}
+                  strokeDashoffset={`${dashOffset}`}
+                />
+              </svg>
+              <svg viewBox="0 0 24 24" className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur sm:mb-7 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <HomeLogo houseName={activeHouse.name} houseImage={activeHouse.house_image} />
@@ -4011,6 +4084,8 @@ const saveUserProfileSettings = async () => {
                         value={inputs[key]}
                         onChange={(event) => setInputs((prev) => ({ ...prev, [key]: event.target.value }))}
                         placeholder={section.placeholder}
+                        enterKeyHint="done"
+                        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleAddItem(key); } }}
                         className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                       />
                       {key === "supermarketShopping" && (
@@ -4058,9 +4133,9 @@ const saveUserProfileSettings = async () => {
                   >
                     <ul className="space-y-2 lg:max-h-[24rem] lg:overflow-y-auto lg:pl-1">
                       {visibleItems.map((item) => {
-                        const creator = houseMembers.find(
-                          (member) => member.id === item.createdByUserId,
-                        );
+                        const creator = item.createdByUserId
+                          ? houseMembersMap.get(item.createdByUserId)
+                          : undefined;
                         const avatarUrl =
                           creator?.avatar_url ||
                           (item.createdByUserId === activeUser?.id
@@ -4071,11 +4146,12 @@ const saveUserProfileSettings = async () => {
                           key={item.id}
                           sortableId={toSortableId(key, item.id)}
                           item={item}
+                          sectionKey={key}
                           createdByAvatarUrl={avatarUrl}
                           addedAtLabel={formatAddedAt(item.createdAt)}
-                          onToggle={() => toggleComplete(key, item.id)}
-                          onEdit={() => editItem(key, item.id)}
-                          onDelete={() => deleteItem(key, item.id)}
+                          onToggle={toggleComplete}
+                          onEdit={editItem}
+                          onDelete={deleteItem}
                         />
                         );
                       })}
@@ -4167,10 +4243,29 @@ const saveUserProfileSettings = async () => {
           )}
       </div>
 
+      {isMobile && isNavHidden && (
+        <button
+          type="button"
+          aria-label="הצג תפריט"
+          onClick={() => setIsNavHidden(false)}
+          className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-40 h-1.5 w-20 -translate-x-1/2 rounded-full bg-slate-300/80 backdrop-blur-sm"
+        />
+      )}
       {isMobile && (
-        <nav className={`bottom-nav fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2 ${activeRecording ? "translate-y-full opacity-0 pointer-events-none" : ""}`}>
+        <nav
+          className={`bottom-nav fixed inset-x-0 bottom-[max(0.45rem,env(safe-area-inset-bottom))] z-40 px-2 ${activeRecording ? "translate-y-full opacity-0 pointer-events-none" : ""}`}
+          style={{
+            transform: isNavHidden ? "translateY(200%)" : navDragY > 0 ? `translateY(${navDragY}px)` : undefined,
+            transition: navDragY > 0 ? "none" : undefined,
+          }}
+        >
           <div className="mx-auto w-full max-w-[min(100vw-0.7rem,24.5rem)] rounded-t-[2.1rem] rounded-b-[1.45rem] border border-white/70 bg-white/70 p-2 shadow-xl shadow-slate-200/70 backdrop-blur-xl">
-            <div className="mx-auto mb-1 h-1.5 w-20 rounded-full bg-slate-200/65" />
+            <div
+              className="mx-auto mb-1 h-1.5 w-20 cursor-grab rounded-full bg-slate-200/65 active:cursor-grabbing"
+              onTouchStart={handleNavDragStart}
+              onTouchMove={handleNavDragMove}
+              onTouchEnd={handleNavDragEnd}
+            />
             <div className="flex items-center justify-between rounded-[1.8rem] border border-white/60 bg-white/45 px-1 py-1.5">
               <a
                 href="#tasks"

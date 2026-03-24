@@ -674,9 +674,10 @@ function fromSortableId(value: string): { sectionKey: SectionKey; itemId: number
   return { sectionKey: rawSectionKey as SectionKey, itemId };
 }
 
-function SortableListItem({
+const SortableListItem = memo(function SortableListItem({
   sortableId,
   item,
+  sectionKey,
   createdByAvatarUrl,
   addedAtLabel,
   onToggle,
@@ -685,16 +686,21 @@ function SortableListItem({
 }: {
   sortableId: string;
   item: Item;
+  sectionKey: SectionKey;
   createdByAvatarUrl?: string;
   addedAtLabel: string;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onToggle: (key: SectionKey, id: number) => void;
+  onEdit: (key: SectionKey, id: number) => void;
+  onDelete: (key: SectionKey, id: number) => void;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({
       id: sortableId,
     });
+
+  const handleToggle = useCallback(() => onToggle(sectionKey, item.id), [onToggle, sectionKey, item.id]);
+  const handleEdit = useCallback(() => onEdit(sectionKey, item.id), [onEdit, sectionKey, item.id]);
+  const handleDelete = useCallback(() => onDelete(sectionKey, item.id), [onDelete, sectionKey, item.id]);
 
   return (
     <li
@@ -729,7 +735,7 @@ function SortableListItem({
           <circle cx="15" cy="18" r="1" />
         </svg>
       </button>
-      <button type="button" onClick={onToggle} className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right">
+      <button type="button" onClick={handleToggle} className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right">
         <span className={`h-5 w-5 shrink-0 rounded-full border ${item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"}`} />
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-sm ${item.completed ? "text-slate-400 line-through" : "text-slate-700"}`}>{item.text}</span>
@@ -753,7 +759,7 @@ function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onEdit}
+        onClick={handleEdit}
         aria-label="עריכה"
         title="עריכה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
@@ -774,7 +780,7 @@ function SortableListItem({
       </button>
       <button
         type="button"
-        onClick={onDelete}
+        onClick={handleDelete}
         aria-label="מחיקה"
         title="מחיקה"
         className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
@@ -798,7 +804,7 @@ function SortableListItem({
       </button>
     </li>
   );
-}
+});
 
 export default function HomePage() {
   const [isMobile, setIsMobile] = useState(true);
