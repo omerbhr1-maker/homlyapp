@@ -3756,7 +3756,7 @@ const saveUserProfileSettings = async () => {
   return (
     <main
       ref={mainScrollRef}
-      className="mx-auto min-h-[100dvh] w-full max-w-[1600px] px-2 py-4 pb-[calc(7.25rem+env(safe-area-inset-bottom))] sm:px-5 sm:py-6 sm:pb-8 lg:px-6"
+      className="relative mx-auto min-h-[100dvh] w-full max-w-[1600px] px-2 py-4 pb-[calc(7.25rem+env(safe-area-inset-bottom))] sm:px-5 sm:py-6 sm:pb-8 lg:px-6"
       onTouchStart={handlePtrStart}
       onTouchMove={handlePtrMove}
       onTouchEnd={() => { void handlePtrEnd(); }}
