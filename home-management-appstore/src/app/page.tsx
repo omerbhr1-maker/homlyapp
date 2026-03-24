@@ -221,6 +221,13 @@ export default function HomePage() {
   // Tracks the updated_at of the last cloud snapshot we accepted.
   // Realtime events older than this are stale echoes and are discarded.
   const lastAcceptedCloudUpdatedAtRef = useRef("");
+
+  // Returns true when an incoming cloud update should be discarded because we've
+  // already accepted a newer (or equal) snapshot. Reads the ref live so it's always fresh.
+  const isStaleCloudUpdate = (updatedAt: string | undefined): boolean => {
+    if (!updatedAt || !lastAcceptedCloudUpdatedAtRef.current) return false;
+    return updatedAt <= lastAcceptedCloudUpdatedAtRef.current;
+  };
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -803,27 +810,26 @@ export default function HomePage() {
     if (!client || !activeHouse?.id) return;
 
     const houseId = activeHouse.id;
-    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+    let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
     let fallbackBootstrapTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const startFallbackSync = () => {
-      if (fallbackInterval) return;
-      const userId = activeUserRef.current?.id;
-      if (userId) {
-        void loadUserHouses(userId, houseId, true);
-      }
-      fallbackInterval = setInterval(() => {
+      if (fallbackTimeout) return;
+      // Immediate first poll, then exponential backoff: 30s → 60s → 90s (cap).
+      const poll = (delay: number) => {
         const uid = activeUserRef.current?.id;
-        if (uid) {
-          void loadUserHouses(uid, houseId, true);
-        }
-      }, 30000);
+        if (uid) void loadUserHouses(uid, houseId, true);
+        fallbackTimeout = setTimeout(() => {
+          poll(Math.min(delay * 2, 90000));
+        }, delay);
+      };
+      poll(30000);
     };
 
     const stopFallbackSync = () => {
-      if (fallbackInterval) {
-        clearInterval(fallbackInterval);
-        fallbackInterval = null;
+      if (fallbackTimeout) {
+        clearTimeout(fallbackTimeout);
+        fallbackTimeout = null;
       }
     };
 
@@ -846,7 +852,7 @@ export default function HomePage() {
           // accepted, do a fresh DB fetch; otherwise discard (it's our own echo).
           if (!next.sections) {
             const nextUpdatedAt = typeof next.updated_at === "string" ? next.updated_at : "";
-            if (!nextUpdatedAt || nextUpdatedAt <= lastAcceptedCloudUpdatedAtRef.current) return;
+            if (!nextUpdatedAt || isStaleCloudUpdate(nextUpdatedAt)) return;
             const uid = activeUserRef.current?.id;
             if (uid) void loadUserHouses(uid, String(next.id), true);
             return;
@@ -875,13 +881,7 @@ export default function HomePage() {
           // Discard stale echoes: if the incoming event's updated_at is older than
           // (or equal to) the last snapshot we accepted, it's an out-of-order echo
           // from a previous save and must not overwrite local state.
-          if (
-            syncedHouse.updated_at &&
-            lastAcceptedCloudUpdatedAtRef.current &&
-            syncedHouse.updated_at <= lastAcceptedCloudUpdatedAtRef.current
-          ) {
-            return;
-          }
+          if (isStaleCloudUpdate(syncedHouse.updated_at)) return;
           if (
             (isHousePersistingRef.current || hasPendingLocalChangesRef.current) &&
             currentHouse?.id === syncedHouse.id
@@ -1064,9 +1064,12 @@ export default function HomePage() {
 
   const pushUndoState = useCallback((label: string) => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    // Store a reference to the pre-mutation sections object — React state is immutable
+    // so this object will never be modified in-place; cloning is deferred until undo is
+    // actually triggered, saving a deep-clone on every action where undo is never used.
     setUndoState({
       label,
-      sections: cloneSections(sectionsRef.current),
+      sections: sectionsRef.current,
     });
     undoTimerRef.current = setTimeout(() => {
       setUndoState(null);
@@ -1076,6 +1079,7 @@ export default function HomePage() {
   const restoreUndo = () => {
     if (!undoState) return;
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    // Clone only now — when the user actually triggers undo.
     setSections(cloneSections(undoState.sections));
     setUndoState(null);
   };
@@ -1786,13 +1790,7 @@ const saveUserProfileSettings = async () => {
     // Discard stale data: if the incoming timestamp is older than (or equal to) what we
     // already accepted, don't overwrite — protects against race between fallback polling
     // returning old DB data after a save already completed.
-    if (
-      house.updated_at &&
-      lastAcceptedCloudUpdatedAtRef.current &&
-      house.updated_at <= lastAcceptedCloudUpdatedAtRef.current
-    ) {
-      return;
-    }
+    if (isStaleCloudUpdate(house.updated_at)) return;
 
     const normalizedSections = normalizeCloudSections(house.sections);
     const normalizedHouse = { ...house, sections: normalizedSections };
