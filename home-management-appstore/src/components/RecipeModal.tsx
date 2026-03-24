@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { MicIcon, AudioWaveIcon } from "@/components/icons";
 import {
   getRecipeQuestionKind,
@@ -25,7 +26,7 @@ type RecipeModalProps = {
   onClose: () => void;
 };
 
-export function RecipeModal({
+export const RecipeModal = memo(function RecipeModal({
   recipeText,
   onRecipeTextChange,
   recipeQuestions,
@@ -220,4 +221,4 @@ export function RecipeModal({
       </div>
     </div>
   );
-}
+});
