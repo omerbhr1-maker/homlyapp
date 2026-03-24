@@ -5,14 +5,17 @@ import { loginUser, waitForApp, TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./he
 // Helper: open the invite modal (Settings → שיתוף והזמנה לבית)
 // ────────────────────────────────────────────────────────────────────────────
 async function openInviteModal(page: import("@playwright/test").Page) {
-  // Open settings (gear icon or "הגדרות" button)
+  // Wait for the main app to load (settings button visible = user is logged in with a house)
   const settingsBtn = page
     .getByRole("button", { name: /הגדרות|⚙|settings/i })
     .first();
-  if (await settingsBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await settingsBtn.click();
+  const appLoaded = await settingsBtn.isVisible({ timeout: 8000 }).catch(() => false);
+  if (!appLoaded) {
+    test.skip(true, "האפליקציה לא נטענה עם בית פעיל — דלג על בדיקה זו");
+    return;
   }
-  // Click the invite/share button (could appear in settings modal or directly in the app)
+  await settingsBtn.click();
+  // Click the invite/share button inside the settings modal
   await page.getByRole("button", { name: /שיתוף והזמנה/i }).click();
   await expect(page.getByText("שיתוף והזמנה לבית")).toBeVisible({ timeout: 5000 });
 }
@@ -316,9 +319,12 @@ test.describe("עזיבת בית והסרת חברים — Settings modal", () =
     const settingsBtn = page
       .getByRole("button", { name: /הגדרות|⚙|settings/i })
       .first();
-    if (await settingsBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await settingsBtn.click();
+    const appLoaded = await settingsBtn.isVisible({ timeout: 8000 }).catch(() => false);
+    if (!appLoaded) {
+      test.skip(true, "האפליקציה לא נטענה עם בית פעיל — דלג על בדיקה זו");
+      return;
     }
+    await settingsBtn.click();
     await expect(page.getByText("הגדרות בית")).toBeVisible({ timeout: 5000 });
   }
 

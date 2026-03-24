@@ -9,18 +9,26 @@ export function useNavDrag() {
   const lastScrollTopRef = useRef(0);
 
   useEffect(() => {
+    let rafId = 0;
     const handleScroll = () => {
-      const scrollTop = window.scrollY;
-      const prev = lastScrollTopRef.current;
-      if (scrollTop > prev && scrollTop > 50) {
-        setIsNavHidden(true);
-      } else if (scrollTop < prev) {
-        setIsNavHidden(false);
-      }
-      lastScrollTopRef.current = scrollTop;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const scrollTop = window.scrollY;
+        const prev = lastScrollTopRef.current;
+        if (scrollTop > prev && scrollTop > 50) {
+          setIsNavHidden(true);
+        } else if (scrollTop < prev) {
+          setIsNavHidden(false);
+        }
+        lastScrollTopRef.current = scrollTop;
+      });
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const handleNavDragStart = (e: React.TouchEvent) => {

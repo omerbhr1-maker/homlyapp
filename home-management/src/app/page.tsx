@@ -235,23 +235,30 @@ export default function HomePage() {
     [houseMembers],
   );
 
+  const normalizedDesktopQuery = useMemo(
+    () => desktopQuery.trim().toLowerCase(),
+    [desktopQuery],
+  );
+
   const sectionStats = useMemo(() => {
-    const q = desktopQuery.trim().toLowerCase();
+    const q = normalizedDesktopQuery;
     return Object.fromEntries(
       sectionOrder.map((key) => {
         const items = sections[key].items;
-        const visibleItems = items.filter((item) => {
-          if (desktopFilter === "open" && item.completed) return false;
-          if (desktopFilter === "done" && !item.completed) return false;
-          if (!q) return true;
-          return item.text.toLowerCase().includes(q);
-        });
-        const doneCount = items.filter((item) => item.completed).length;
+        const visibleItems: Item[] = [];
+        let doneCount = 0;
+        for (const item of items) {
+          if (item.completed) doneCount++;
+          if (desktopFilter === "open" && item.completed) continue;
+          if (desktopFilter === "done" && !item.completed) continue;
+          if (q && !item.text.toLowerCase().includes(q)) continue;
+          visibleItems.push(item);
+        }
         const progress = items.length ? Math.round((doneCount / items.length) * 100) : 0;
         return [key, { visibleItems, doneCount, progress }];
       }),
     ) as Record<SectionKey, { visibleItems: Item[]; doneCount: number; progress: number }>;
-  }, [sections, desktopFilter, desktopQuery]);
+  }, [sections, desktopFilter, normalizedDesktopQuery]);
 
   // Surface any unhandled JS errors to the Xcode console for easier debugging.
   useEffect(() => {
@@ -1025,12 +1032,7 @@ export default function HomePage() {
 
       if (event.shiftKey && ["1", "2", "3"].includes(event.key)) {
         event.preventDefault();
-        const sectionByShortcut: SectionKey[] = [
-          "homeTasks",
-          "generalShopping",
-          "supermarketShopping",
-        ];
-        const section = sectionByShortcut[Number(event.key) - 1];
+        const section = sectionOrder[Number(event.key) - 1];
         const anchor = sectionAnchors[section];
         const node = document.getElementById(anchor);
         node?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1327,6 +1329,17 @@ export default function HomePage() {
     setIsRecipeModalOpen(true);
   }, []);
 
+  const handleRecipeAnswerChange = useCallback((questionId: string, value: RecipeAnswerValue) => {
+    setRecipeError("");
+    setRecipeAnswers((prev) => ({ ...prev, [questionId]: value }));
+  }, []);
+
+  const handleRecipeClose = useCallback(() => {
+    setIsRecipeModalOpen(false);
+    setRecipeRecording(false);
+    recipeRecognitionRef.current?.stop();
+  }, []);
+
   const reorderWithinSection = (
     key: SectionKey,
     sourceItemId: number,
@@ -1337,8 +1350,13 @@ export default function HomePage() {
 
     setSections((prev) => {
       const items = [...prev[key].items];
-      const sourceIndex = items.findIndex((item) => item.id === sourceItemId);
-      const targetIndex = items.findIndex((item) => item.id === targetItemId);
+      let sourceIndex = -1;
+      let targetIndex = -1;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === sourceItemId) sourceIndex = i;
+        else if (items[i].id === targetItemId) targetIndex = i;
+        if (sourceIndex >= 0 && targetIndex >= 0) break;
+      }
       if (sourceIndex < 0 || targetIndex < 0) return prev;
 
       return {
@@ -2780,10 +2798,7 @@ const saveUserProfileSettings = async () => {
               onRecipeTextChange={setRecipeText}
               recipeQuestions={recipeQuestions}
               recipeAnswers={recipeAnswers}
-              onRecipeAnswerChange={(questionId, value) => {
-                setRecipeError("");
-                setRecipeAnswers((prev) => ({ ...prev, [questionId]: value }));
-              }}
+              onRecipeAnswerChange={handleRecipeAnswerChange}
               recipeItems={recipeItems}
               recipeNotes={recipeNotes}
               recipeError={recipeError}
@@ -2792,11 +2807,7 @@ const saveUserProfileSettings = async () => {
               onToggleRecording={toggleRecipeRecording}
               onRunRecipe={() => void runRecipeAi()}
               onAddToSupermarket={addRecipeItemsToSupermarket}
-              onClose={() => {
-                setIsRecipeModalOpen(false);
-                setRecipeRecording(false);
-                recipeRecognitionRef.current?.stop();
-              }}
+              onClose={handleRecipeClose}
             /></Suspense>
           )}
 
