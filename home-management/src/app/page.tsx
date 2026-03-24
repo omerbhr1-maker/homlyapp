@@ -77,6 +77,11 @@ import { PullToRefreshIndicator } from "@/components/PullToRefreshIndicator";
 import { HouseHeader } from "@/components/HouseHeader";
 import { HouseMembersSection } from "@/components/HouseMembersSection";
 import { SectionCard } from "@/components/SectionCard";
+import { DesktopFilterBar } from "@/components/DesktopFilterBar";
+import { DragOverlayItem } from "@/components/DragOverlayItem";
+import { optimizeImageFile, uploadImageToStorage } from "@/lib/image-utils";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { useNavDrag } from "@/hooks/useNavDrag";
 
 const RecipeModal = lazy(() => import("@/components/RecipeModal").then((m) => ({ default: m.RecipeModal })));
 const InviteModal = lazy(() => import("@/components/InviteModal").then((m) => ({ default: m.InviteModal })));
@@ -155,17 +160,17 @@ export default function HomePage() {
   const [homeLink, setHomeLink] = useState("");
 
   const [activeRecording, setActiveRecording] = useState<SectionKey | null>(null);
-  const [ptrDist, setPtrDist] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isPtrDone, setIsPtrDone] = useState(false);
-  const ptrStartYRef = useRef(0);
-  const ptrAtTopRef = useRef(false);
   const mainScrollRef = useRef<HTMLElement>(null);
-  const PTR_THRESHOLD = 65;
-  const [isNavHidden, setIsNavHidden] = useState(false);
-  const [navDragY, setNavDragY] = useState(0);
-  const navDragStartRef = useRef(0);
-  const lastScrollTopRef = useRef(0);
+  const { ptrDist, isRefreshing, isPtrDone, PTR_THRESHOLD, handlePtrStart, handlePtrMove, handlePtrEnd } = usePullToRefresh({
+    mainScrollRef,
+    onRefresh: async () => {
+      const userId = activeUserRef.current?.id;
+      const houseId = activeHouseRef.current?.id;
+      lastAcceptedCloudUpdatedAtRef.current = "";
+      if (userId) await loadUserHouses(userId, houseId, true);
+    },
+  });
+  const { isNavHidden, setIsNavHidden, navDragY, handleNavDragStart, handleNavDragMove, handleNavDragEnd } = useNavDrag();
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -1374,118 +1379,6 @@ export default function HomePage() {
     setDragOverlayItem(null);
   };
 
-  const readFileAsDataUrl = (file: File) =>
-    new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(typeof reader.result === "string" ? reader.result : "");
-      };
-      reader.onerror = () => resolve("");
-      reader.readAsDataURL(file);
-    });
-
-  const optimizeImageFile = async (file: File, maxSize: number, quality: number) => {
-    // Auto-convert HEIC/HEIF to JPEG for cross-browser support.
-    let processFile = file;
-    const isHeic =
-      file.type === "image/heic" ||
-      file.type === "image/heif" ||
-      /\.(heic|heif)$/i.test(file.name);
-    if (isHeic) {
-      try {
-        const heic2any = (await import("heic2any")).default;
-        const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-        processFile = new File(
-          [converted as Blob],
-          file.name.replace(/\.(heic|heif)$/i, ".jpg"),
-          { type: "image/jpeg" },
-        );
-      } catch {
-        // heic2any failed — fall through to canvas attempt (works on iOS Safari natively).
-      }
-    }
-
-    const fallback = await readFileAsDataUrl(processFile);
-    try {
-      const objectUrl = URL.createObjectURL(processFile);
-      const image = new window.Image();
-      const loaded = new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error("image-load-failed"));
-      });
-      image.src = objectUrl;
-      await loaded;
-
-      const width = image.naturalWidth || image.width;
-      const height = image.naturalHeight || image.height;
-      if (!width || !height) {
-        URL.revokeObjectURL(objectUrl);
-        return fallback;
-      }
-
-      const scale = Math.min(1, maxSize / Math.max(width, height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(width * scale));
-      canvas.height = Math.max(1, Math.round(height * scale));
-
-      const context = canvas.getContext("2d");
-      if (!context) {
-        URL.revokeObjectURL(objectUrl);
-        return fallback;
-      }
-
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(objectUrl);
-
-      // Try progressively lower quality until under 200KB (~267K base64 chars).
-      const MAX_CHARS = 270_000;
-      let optimized = canvas.toDataURL("image/jpeg", quality);
-      if (optimized.length > MAX_CHARS) {
-        optimized = canvas.toDataURL("image/jpeg", 0.65);
-      }
-      if (optimized.length > MAX_CHARS) {
-        optimized = canvas.toDataURL("image/jpeg", 0.45);
-      }
-      // Still too large — try at half the size.
-      if (optimized.length > MAX_CHARS && canvas.width > 320) {
-        const small = document.createElement("canvas");
-        small.width = Math.round(canvas.width / 2);
-        small.height = Math.round(canvas.height / 2);
-        small.getContext("2d")?.drawImage(canvas, 0, 0, small.width, small.height);
-        optimized = small.toDataURL("image/jpeg", 0.6);
-      }
-      if (!optimized || optimized.length > MAX_CHARS) return "";
-      return optimized;
-    } catch {
-      // Fallback (original file) — only if within size limit.
-      if (fallback.length > 270_000) return "";
-      return fallback;
-    }
-  };
-
-  // Uploads a base64 data-URL to Supabase Storage and returns the public URL.
-  // Falls back to the original base64 value if the upload fails, so callers
-  // always get a usable image string regardless of network state.
-  const uploadImageToStorage = async (base64: string, path: string): Promise<string> => {
-    const client = supabase;
-    if (!client || !base64.startsWith("data:")) return base64;
-    try {
-      const [header, data] = base64.split(",");
-      if (!data) return base64;
-      const mime = header.match(/data:([^;]+)/)?.[1] ?? "image/jpeg";
-      const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: mime });
-      const { error } = await client.storage.from("homly-images").upload(path, blob, {
-        contentType: mime,
-        upsert: true,
-      });
-      if (error) return base64;
-      const { data: urlData } = client.storage.from("homly-images").getPublicUrl(path);
-      return urlData.publicUrl;
-    } catch {
-      return base64;
-    }
-  };
 
   const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
@@ -1870,68 +1763,6 @@ const saveUserProfileSettings = async () => {
     setIsRecipeModalOpen(false);
   };
 
-  const handlePtrStart = (e: React.TouchEvent) => {
-    const el = mainScrollRef.current;
-    ptrAtTopRef.current = !el || el.scrollTop <= 0;
-    ptrStartYRef.current = e.touches[0].clientY;
-  };
-
-  const handlePtrMove = (e: React.TouchEvent) => {
-    if (!ptrAtTopRef.current || isRefreshing) return;
-    const dy = e.touches[0].clientY - ptrStartYRef.current;
-    if (dy <= 0) { setPtrDist(0); return; }
-    // Apply resistance so it doesn't stretch too far
-    setPtrDist(Math.min(dy * 0.45, 80));
-  };
-
-  const handlePtrEnd = async () => {
-    if (ptrDist >= PTR_THRESHOLD && !isRefreshing) {
-      setPtrDist(0);
-      setIsRefreshing(true);
-      const userId = activeUserRef.current?.id;
-      const houseId = activeHouseRef.current?.id;
-      // Clear lastAcceptedCloudUpdatedAtRef so fresh data is always applied
-      lastAcceptedCloudUpdatedAtRef.current = "";
-      if (userId) await loadUserHouses(userId, houseId, true);
-      setIsRefreshing(false);
-      setIsPtrDone(true);
-      setTimeout(() => setIsPtrDone(false), 900);
-    } else {
-      setPtrDist(0);
-    }
-  };
-
-  const handleNavDragStart = (e: React.TouchEvent) => {
-    navDragStartRef.current = e.touches[0].clientY;
-  };
-  const handleNavDragMove = (e: React.TouchEvent) => {
-    const dy = e.touches[0].clientY - navDragStartRef.current;
-    if (dy <= 0) return;
-    setNavDragY(Math.min(dy, 130));
-  };
-  const handleNavDragEnd = () => {
-    if (navDragY >= 55) {
-      setNavDragY(0);
-      setIsNavHidden(true);
-    } else {
-      setNavDragY(0);
-    }
-  };
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollTop = window.scrollY;
-      const prev = lastScrollTopRef.current;
-      if (scrollTop > prev && scrollTop > 50) {
-        setIsNavHidden(true);
-      } else if (scrollTop < prev) {
-        setIsNavHidden(false);
-      }
-      lastScrollTopRef.current = scrollTop;
-    };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
 
   const applyActiveHouse = (house: CloudHouseRow) => {
     // Discard stale data: if the incoming timestamp is older than (or equal to) what we
@@ -2877,50 +2708,16 @@ const saveUserProfileSettings = async () => {
       />
 
       <div>
-        <div className="mb-4 hidden grid-cols-1 gap-3 lg:grid lg:grid-cols-[1.2fr_1fr]">
-          <section className="rounded-3xl border border-white/80 bg-white/95 p-4 shadow-lg shadow-slate-200/70">
-            <p className="text-xs font-bold text-slate-500">חיפוש וסינון</p>
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                ref={desktopSearchRef}
-                value={desktopQuery}
-                onChange={(event) => setDesktopQuery(event.target.value)}
-                placeholder="חיפוש מהיר בכל הרשימות..."
-                className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-              />
-              <select
-                value={desktopFilter}
-                onChange={(event) => setDesktopFilter(event.target.value as "all" | "open" | "done")}
-                className="min-h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-              >
-                <option value="all">הכול</option>
-                <option value="open">פתוחים</option>
-                <option value="done">הושלמו</option>
-              </select>
-            </div>
-          </section>
-
-          <section className="rounded-3xl border border-white/80 bg-white/95 p-4 shadow-lg shadow-slate-200/70">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-2xl bg-sky-50 px-3 py-3 text-center text-xs font-bold text-sky-700">
-                משימות
-                <br />
-                {sections.homeTasks.items.length}
-              </div>
-              <div className="rounded-2xl bg-teal-50 px-3 py-3 text-center text-xs font-bold text-teal-700">
-                כללי
-                <br />
-                {sections.generalShopping.items.length}
-              </div>
-              <div className="rounded-2xl bg-violet-50 px-3 py-3 text-center text-xs font-bold text-violet-700">
-                סופר
-                <br />
-                {sections.supermarketShopping.items.length}
-              </div>
-            </div>
-          </section>
-
-        </div>
+        <DesktopFilterBar
+          desktopSearchRef={desktopSearchRef}
+          desktopQuery={desktopQuery}
+          setDesktopQuery={setDesktopQuery}
+          desktopFilter={desktopFilter}
+          setDesktopFilter={setDesktopFilter}
+          taskCount={sections.homeTasks.items.length}
+          generalCount={sections.generalShopping.items.length}
+          supermarketCount={sections.supermarketShopping.items.length}
+        />
 
         {voiceError && (
           <p className="mb-3 rounded-2xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
@@ -2973,32 +2770,7 @@ const saveUserProfileSettings = async () => {
             ))}
           </section>
           <DragOverlay>
-            {dragOverlayItem ? (
-              <div className="flex w-[min(92vw,30rem)] items-center gap-2 rounded-2xl border border-teal-300 bg-white px-3 py-2 shadow-2xl shadow-slate-300">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <circle cx="9" cy="6" r="1" />
-                    <circle cx="9" cy="12" r="1" />
-                    <circle cx="9" cy="18" r="1" />
-                    <circle cx="15" cy="6" r="1" />
-                    <circle cx="15" cy="12" r="1" />
-                    <circle cx="15" cy="18" r="1" />
-                  </svg>
-                </span>
-                <span className={`truncate text-sm font-bold ${dragOverlayItem.completed ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                  {dragOverlayItem.text}
-                </span>
-              </div>
-            ) : null}
+            {dragOverlayItem ? <DragOverlayItem item={dragOverlayItem} /> : null}
           </DragOverlay>
         </DndContext>
 
