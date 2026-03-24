@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { SafeImage } from "@/components/SafeImage";
 
 type SettingsModalProps = {
@@ -20,7 +20,7 @@ type SettingsModalProps = {
   onLeaveHouse: () => void;
 };
 
-export function SettingsModal({
+export const SettingsModal = memo(function SettingsModal({
   settingsHouseName,
   onSettingsHouseNameChange,
   settingsHouseImage,
@@ -181,4 +181,4 @@ export function SettingsModal({
       </div>
     </div>
   );
-}
+});

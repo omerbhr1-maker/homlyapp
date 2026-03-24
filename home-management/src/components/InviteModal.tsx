@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 type InviteModalProps = {
   invitePhone: string;
   onInvitePhoneChange: (value: string) => void;
@@ -16,7 +18,7 @@ type InviteModalProps = {
   onClose: () => void;
 };
 
-export function InviteModal({
+export const InviteModal = memo(function InviteModal({
   invitePhone,
   onInvitePhoneChange,
   inviteIdentifierInput,
@@ -126,4 +128,4 @@ export function InviteModal({
       </div>
     </div>
   );
-}
+});

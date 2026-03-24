@@ -1124,7 +1124,7 @@ export default function HomePage() {
     });
   }, [pushUndoState]);
 
-  const finalizeRecording = async () => {
+  const finalizeRecording = useCallback(async () => {
     const sectionKey = recordingSectionRef.current;
     const transcript = transcriptBufferRef.current;
 
@@ -1138,9 +1138,9 @@ export default function HomePage() {
     setActiveRecording(null);
     recordingSectionRef.current = null;
     transcriptBufferRef.current = "";
-  };
+  }, [addBatchItems]);
 
-  const startRecording = (key: SectionKey) => {
+  const startRecording = useCallback((key: SectionKey) => {
     const speechWindow = window as Window & {
       SpeechRecognition?: SpeechRecognitionCtor;
       webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -1193,9 +1193,9 @@ export default function HomePage() {
     recordingSectionRef.current = key;
     setActiveRecording(key);
     recognition.start();
-  };
+  }, [finalizeRecording]);
 
-  const toggleRecording = (key: SectionKey) => {
+  const toggleRecording = useCallback((key: SectionKey) => {
     if (activeRecording === key) {
       shouldKeepRecordingRef.current = false;
       recognitionRef.current?.stop();
@@ -1208,7 +1208,7 @@ export default function HomePage() {
     }
 
     startRecording(key);
-  };
+  }, [activeRecording, startRecording]);
 
   const toggleRecipeRecording = useCallback(() => {
     const speechWindow = window as Window & {
@@ -1641,7 +1641,7 @@ const saveUserProfileSettings = async () => {
     setIsDeletingHouse(false);
   };
 
-  const runRecipeFallback = () => {
+  const runRecipeFallback = useCallback(() => {
     const hasAnswer = (questionId: string) =>
       !isRecipeAnswerMissing(
         { id: questionId, title: questionId, kind: "text" },
@@ -1705,9 +1705,9 @@ const saveUserProfileSettings = async () => {
     setRecipeQuestions([]);
     setRecipeItems(Array.from(items));
     setRecipeNotes("הרשימה הופקה במצב חכם מקומי.");
-  };
+  }, [recipeText, recipeAnswers]);
 
-  const runRecipeAi = async () => {
+  const runRecipeAi = useCallback(async () => {
     if (!recipeText.trim()) return;
     if (recipeQuestions.length > 0) {
       const missingQuestion = recipeQuestions.find((question) =>
@@ -1788,7 +1788,7 @@ const saveUserProfileSettings = async () => {
     } finally {
       setIsRecipeLoading(false);
     }
-  };
+  }, [recipeText, recipeQuestions, recipeAnswers, runRecipeFallback]);
 
   const addRecipeItemsToSupermarket = useCallback(() => {
     addBatchItems("supermarketShopping", recipeItems, "נוספו פריטי מתכון");

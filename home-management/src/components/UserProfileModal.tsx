@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import { memo } from "react";
 import { SafeImage } from "@/components/SafeImage";
 import type { CloudUserRow } from "@/types";
 
@@ -19,7 +19,7 @@ type UserProfileModalProps = {
   onClose: () => void;
 };
 
-export function UserProfileModal({
+export const UserProfileModal = memo(function UserProfileModal({
   activeUser,
   userProfileImage,
   userProfileName,
@@ -122,4 +122,4 @@ export function UserProfileModal({
       </div>
     </div>
   );
-}
+});
