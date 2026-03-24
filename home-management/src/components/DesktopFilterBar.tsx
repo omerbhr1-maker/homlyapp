@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import { memo } from "react";
 
 type DesktopFilterBarProps = {
   desktopSearchRef: React.RefObject<HTMLInputElement | null>;
@@ -13,7 +13,7 @@ type DesktopFilterBarProps = {
   supermarketCount: number;
 };
 
-export function DesktopFilterBar({
+export const DesktopFilterBar = memo(function DesktopFilterBar({
   desktopSearchRef,
   desktopQuery,
   setDesktopQuery,
@@ -68,4 +68,4 @@ export function DesktopFilterBar({
       </section>
     </div>
   );
-}
+});
