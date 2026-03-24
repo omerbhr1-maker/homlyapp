@@ -5,9 +5,7 @@ import Image from "next/image";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { passthroughImageLoader } from "@/lib/utils";
-import type { Item } from "@/types";
-
-type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
+import type { Item, SectionKey } from "@/types";
 
 export const SortableListItem = memo(function SortableListItem({
   sortableId,

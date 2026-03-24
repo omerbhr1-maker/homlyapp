@@ -1,7 +1,6 @@
 "use client";
 
-import { forwardRef, lazy, memo, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import Image, { type ImageLoaderProps } from "next/image";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
 import {
   DndContext,
@@ -16,621 +15,74 @@ import {
 import {
   SortableContext,
   arrayMove,
-  useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import type { User } from "@supabase/supabase-js";
-import { CSS } from "@dnd-kit/utilities";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { appCacheStorage, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
+import type {
+  SectionKey,
+  Item,
+  UndoState,
+  CloudHouseRow,
+  CloudUserRow,
+  InviteLookupByEmail,
+  HouseMemberUser,
+  CachedHouseMeta,
+  SpeechRecognitionInstance,
+  SpeechRecognitionCtor,
+  RecipeQuestion,
+  RecipeAnswerValue,
+  RecipeAiResponse,
+} from "@/types";
+import {
+  sectionOrder,
+  sectionAnchors,
+  initialSections,
+  PENDING_JOIN_CODE_KEY,
+  PENDING_JOIN_HOUSE_KEY,
+  CACHED_USER_KEY,
+} from "@/lib/constants";
+import {
+  createInviteToken,
+  normalizeUsername,
+  getAuthEmailFromUsername,
+  isValidEmail,
+  getPublicAppOrigin,
+  toCachedUser,
+  toCachedHouseMeta,
+  toCachedHouseMembers,
+  formatAddedAt,
+  normalizeRecipeQuestions,
+  getRecipeAnswerValues,
+  isRecipeAnswerMissing,
+  getDefaultSectionItems,
+  normalizeCloudSections,
+  cloneSections,
+  toSortableId,
+  fromSortableId,
+} from "@/lib/utils";
+import {
+  getSelectedHouseStorageKey,
+  getCachedHouseMetaStorageKey,
+  getCachedHouseMembersStorageKey,
+  getCachedHouseSectionsStorageKey,
+} from "@/lib/storage";
+import { SafeImage } from "@/components/SafeImage";
+import { HomeLogo } from "@/components/HomeLogo";
+import { LoadingBar } from "@/components/LoadingBar";
+import { AudioWaveIcon, MicIcon, RecipeIcon } from "@/components/icons";
+import { SortableListItem } from "@/components/SortableListItem";
+import { SectionInput, type SectionInputHandle } from "@/components/SectionInput";
+import { AuthScreen } from "@/components/AuthScreen";
+import { HouseLoadingScreen } from "@/components/HouseLoadingScreen";
+import { HouseSelectorScreen } from "@/components/HouseSelectorScreen";
 
 const RecipeModal = lazy(() => import("@/components/RecipeModal").then((m) => ({ default: m.RecipeModal })));
 const InviteModal = lazy(() => import("@/components/InviteModal").then((m) => ({ default: m.InviteModal })));
 const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
-type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
-
-type Item = {
-  id: number;
-  text: string;
-  completed: boolean;
-  createdByUserId?: string;
-  createdByName?: string;
-  createdAt?: string;
-};
-
-type Section = {
-  title: string;
-  placeholder: string;
-  items: Item[];
-};
-
-type UndoState = {
-  label: string;
-  sections: Record<SectionKey, Section>;
-};
-
-type CloudHouseRow = {
-  id: string;
-  name: string;
-  pin?: string;
-  sections: Record<SectionKey, Item[]>;
-  invite_phone: string;
-  house_image?: string;
-  owner_user_id?: string | null;
-  updated_at?: string;
-};
-
-type CloudUserRow = {
-  id: string;
-  username: string;
-  display_name: string;
-  avatar_url: string;
-  auth_user_id?: string | null;
-};
-
-type InviteLookupByEmail = {
-  app_user_id: string;
-};
-
-type HouseMemberUser = {
-  id: string;
-  display_name: string;
-  avatar_url: string;
-  role: "owner" | "member";
-};
-
-type CachedHouseMeta = {
-  id: string;
-  name: string;
-  pin?: string;
-  invite_phone: string;
-  house_image?: string;
-  owner_user_id?: string | null;
-};
-
-type SpeechRecognitionEventLike = {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
-};
-
-type SpeechRecognitionInstance = {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: { error: string }) => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
-
-type RecipeQuestionKind = "single" | "multi" | "text";
-type RecipeAnswerValue = string | string[];
-
-type RecipeQuestion = {
-  id: string;
-  title: string;
-  kind?: RecipeQuestionKind;
-  options?: string[];
-  placeholder?: string;
-  maxSelections?: number;
-};
-
-type RecipeAiResponse = {
-  needs_clarification: boolean;
-  questions: RecipeQuestion[];
-  items: { name: string; amount?: string }[];
-  notes?: string;
-  source?: "ai" | "fallback";
-};
-
-const sectionOrder: SectionKey[] = [
-  "supermarketShopping",
-  "homeTasks",
-  "generalShopping",
-];
-
-const sectionAnchors: Record<SectionKey, string> = {
-  homeTasks: "tasks",
-  generalShopping: "general",
-  supermarketShopping: "supermarket",
-};
-
-const defaultCreatedAt = new Date().toISOString();
-
-const initialSections: Record<SectionKey, Section> = {
-  homeTasks: {
-    title: "משימות בית",
-    placeholder: "הוספת משימה חדשה",
-    items: [
-      {
-        id: 1,
-        text: "לקפל כביסה",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 2,
-        text: "לשטוף כלים",
-        completed: true,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 3,
-        text: "להוציא אשפה",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-    ],
-  },
-  generalShopping: {
-    title: "רשימת קניות כללית",
-    placeholder: "הוספת פריט לרשימה",
-    items: [
-      {
-        id: 1,
-        text: "סבון ידיים",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 2,
-        text: "נייר אפייה",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 3,
-        text: "שקיות זבל",
-        completed: true,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-    ],
-  },
-  supermarketShopping: {
-    title: "רשימת קניות לסופר",
-    placeholder: "הוספת מוצר לסופר",
-    items: [
-      {
-        id: 1,
-        text: "חלב",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 2,
-        text: "לחם",
-        completed: true,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-      {
-        id: 3,
-        text: "ביצים",
-        completed: false,
-        createdByName: "Homly",
-        createdAt: defaultCreatedAt,
-      },
-    ],
-  },
-};
-
-const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
-
-function createInviteToken() {
-  return Math.random().toString(36).slice(2, 10).toUpperCase();
-}
-
-function normalizeUsername(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, "");
-}
-
-function getAuthEmailFromUsername(username: string) {
-  if (username.includes("@")) return username;
-  return `${username}@homly.app`;
-}
-
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function getPublicAppOrigin() {
-  const configured = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
-  const normalize = (value: string) => {
-    try {
-      return new URL(value).origin;
-    } catch {
-      return "";
-    }
-  };
-
-  const configuredOrigin = normalize(configured);
-  if (configuredOrigin) return configuredOrigin;
-
-  if (typeof window !== "undefined") {
-    const origin = window.location.origin;
-    const isLocalHost =
-      window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    if (!isLocalHost) return origin;
-  }
-
-  return "https://home-management-hebrew.pages.dev";
-}
-
-
-function sanitizeCachedImage(value?: string) {
-  const nextValue = String(value || "").trim();
-  if (!nextValue) return "";
-  if (nextValue.startsWith("data:")) return "";
-  if (nextValue.length > 2048) return "";
-  return nextValue;
-}
-
-function toCachedUser(user: CloudUserRow): CloudUserRow {
-  return {
-    ...user,
-    avatar_url: sanitizeCachedImage(user.avatar_url),
-  };
-}
-
-function toCachedHouseMeta(house: CloudHouseRow): CachedHouseMeta {
-  return {
-    id: house.id,
-    name: house.name,
-    pin: house.pin || "",
-    invite_phone: house.invite_phone || "",
-    house_image: sanitizeCachedImage(house.house_image),
-    owner_user_id: house.owner_user_id ?? null,
-  };
-}
-
-function toCachedHouseMembers(members: HouseMemberUser[]) {
-  return members.map((member) => ({
-    ...member,
-    avatar_url: sanitizeCachedImage(member.avatar_url),
-  }));
-}
-
-function formatAddedAt(value?: string) {
-  if (!value) return "תאריך לא זמין";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "תאריך לא זמין";
-  return new Intl.DateTimeFormat("he-IL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function normalizeRecipeQuestions(rawQuestions: RecipeQuestion[]) {
-  return rawQuestions
-    .map((question) => {
-      const id = String(question.id || "").trim();
-      const title = String(question.title || "").trim();
-      const options = Array.isArray(question.options)
-        ? Array.from(
-            new Set(
-              question.options
-                .map((option) => String(option || "").trim())
-                .filter(Boolean),
-            ),
-          ).slice(0, 8)
-        : [];
-      const kind: RecipeQuestionKind =
-        question.kind === "multi" || question.kind === "text" || question.kind === "single"
-          ? question.kind
-          : options.length > 0
-            ? "single"
-            : "text";
-
-      if (!id || !title) return null;
-      if ((kind === "single" || kind === "multi") && options.length === 0) return null;
-      const maxSelections =
-        kind === "multi"
-          ? Math.max(
-              1,
-              Math.min(
-                options.length || 1,
-                Number.isFinite(question.maxSelections) ? Number(question.maxSelections) : options.length || 1,
-              ),
-            )
-          : undefined;
-      return {
-        id,
-        title,
-        kind,
-        options: kind === "text" ? [] : options,
-        placeholder: String(question.placeholder || "").trim() || undefined,
-        maxSelections,
-      } satisfies RecipeQuestion;
-    })
-    .filter((question): question is NonNullable<typeof question> => Boolean(question))
-    .slice(0, 4);
-}
-
-function getRecipeQuestionKind(question: RecipeQuestion): RecipeQuestionKind {
-  if (question.kind === "single" || question.kind === "multi" || question.kind === "text") {
-    return question.kind;
-  }
-  return question.options && question.options.length > 0 ? "single" : "text";
-}
-
-function getRecipeAnswerValues(value: RecipeAnswerValue | undefined) {
-  if (Array.isArray(value)) {
-    return value.map((item) => item.trim()).filter(Boolean);
-  }
-  const text = String(value || "").trim();
-  if (!text) return [];
-  return text.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-function isRecipeAnswerMissing(question: RecipeQuestion, value: RecipeAnswerValue | undefined) {
-  const kind = getRecipeQuestionKind(question);
-  if (kind === "multi") return getRecipeAnswerValues(value).length === 0;
-  const text = Array.isArray(value) ? value.join(", ") : String(value || "");
-  return text.trim().length === 0;
-}
-
-function SafeImage({
-  src,
-  alt,
-  width,
-  height,
-  className,
-  fallback,
-}: {
-  src?: string;
-  alt: string;
-  width: number;
-  height: number;
-  className: string;
-  fallback: React.ReactNode;
-}) {
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    setHasError(false);
-  }, [src]);
-
-  if (!src || hasError) {
-    return <>{fallback}</>;
-  }
-
-  return (
-    <img
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      className={className}
-      loading="lazy"
-      decoding="async"
-      referrerPolicy="no-referrer"
-      onError={() => setHasError(true)}
-    />
-  );
-}
-
-function HomeLogo({ houseName, houseImage }: { houseName?: string; houseImage?: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <SafeImage
-        src={houseImage}
-        alt="תמונת בית"
-        width={44}
-        height={44}
-        className="h-11 w-11 rounded-2xl border border-slate-200 object-cover shadow-lg shadow-slate-200"
-        fallback={
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 text-white shadow-lg shadow-teal-200">
-            <svg
-              viewBox="0 0 24 24"
-              className="h-6 w-6"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.1"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
-              <path d="M9 20v-6.2" />
-              <path d="M15 20v-6.2" />
-              <path d="M9 14h6" />
-              <path d="M16.8 6.1V4.6" />
-              <path d="M18.4 3.2v2.1" />
-              <path d="M17.35 4.25h2.1" />
-            </svg>
-          </span>
-        }
-      />
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{houseName || "Homly"}</h1>
-        <p className="text-sm text-slate-500 sm:text-base">
-          {houseName ? "Homly" : "ניהול בית חכם, מהיר ונוח"}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function LoadingBar({ done }: { done?: boolean }) {
-  const [pct, setPct] = useState(0);
-  const pctRef = useRef(0);
-
-  useEffect(() => {
-    pctRef.current = 0;
-    setPct(0);
-    const timer = setInterval(() => {
-      const cur = pctRef.current;
-      if (cur >= 90) { clearInterval(timer); return; }
-      const step = cur < 30 ? 9 : cur < 60 ? 6 : cur < 80 ? 3 : 1;
-      pctRef.current = Math.min(90, cur + step);
-      setPct(Math.round(pctRef.current));
-    }, 130);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (done) setPct(100);
-  }, [done]);
-
-  return (
-    <div className="mt-5">
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-        <div
-          className="h-full rounded-full bg-gradient-to-l from-teal-500 to-cyan-500 transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <p className="mt-2 text-xs font-bold text-teal-600">{pct}%</p>
-    </div>
-  );
-}
-
-function AudioWaveIcon() {
-  return (
-    <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "flex-end", gap: "2px", width: "18px", height: "16px" }}>
-      {(["6px","11px","14px","11px"] as const).map((h, i) => (
-        <span key={i} style={{ display: "block", width: "3px", height: h, borderRadius: "2px", backgroundColor: "currentColor", transformOrigin: "bottom", animation: "audioWaveBar 0.7s ease-in-out infinite", animationDelay: `${i * 0.15}s` }} />
-      ))}
-    </span>
-  );
-}
-
-function MicIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-      <path d="M19 11a7 7 0 0 1-14 0" />
-      <path d="M12 18v3" />
-    </svg>
-  );
-}
-
-function RecipeIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 6h16" />
-      <path d="M7 3v6" />
-      <path d="M17 3v6" />
-      <rect x="4" y="6" width="16" height="15" rx="2" />
-      <path d="M8 12h8" />
-      <path d="M8 16h5" />
-    </svg>
-  );
-}
-
-function getDefaultSectionItems() {
-  return {
-    homeTasks: [...initialSections.homeTasks.items],
-    generalShopping: [...initialSections.generalShopping.items],
-    supermarketShopping: [...initialSections.supermarketShopping.items],
-  };
-}
-
-function normalizeCloudSections(
-  sections: Record<SectionKey, Item[]> | null | undefined,
-): Record<SectionKey, Item[]> {
-  const fallback = getDefaultSectionItems();
-  if (!sections) return fallback;
-
-  const normalizeItems = (items: Item[] | undefined, fallbackItems: Item[]) =>
-    (Array.isArray(items) ? items : fallbackItems).map((item, index) => ({
-      id: typeof item.id === "number" ? item.id : index + 1,
-      text: String(item.text || "").trim(),
-      completed: Boolean(item.completed),
-      createdByUserId: item.createdByUserId,
-      createdByName: item.createdByName || "לא ידוע",
-      createdAt:
-        typeof item.createdAt === "string" && item.createdAt
-          ? item.createdAt
-          : new Date().toISOString(),
-    }));
-
-  return {
-    homeTasks: normalizeItems(sections.homeTasks, fallback.homeTasks),
-    generalShopping: normalizeItems(sections.generalShopping, fallback.generalShopping),
-    supermarketShopping: normalizeItems(
-      sections.supermarketShopping,
-      fallback.supermarketShopping,
-    ),
-  };
-}
-
-function cloneSections(source: Record<SectionKey, Section>): Record<SectionKey, Section> {
-  return {
-    homeTasks: {
-      ...source.homeTasks,
-      items: source.homeTasks.items.map((item) => ({ ...item })),
-    },
-    generalShopping: {
-      ...source.generalShopping,
-      items: source.generalShopping.items.map((item) => ({ ...item })),
-    },
-    supermarketShopping: {
-      ...source.supermarketShopping,
-      items: source.supermarketShopping.items.map((item) => ({ ...item })),
-    },
-  };
-}
-
-const SORTABLE_SEP = "::";
-const PENDING_JOIN_CODE_KEY = "homly_pending_join_code";
-const PENDING_JOIN_HOUSE_KEY = "homly_pending_join_house";
-const SELECTED_HOUSE_KEY_PREFIX = "homly_selected_house_";
-const CACHED_USER_KEY = "homly_cached_user";
-const CACHED_HOUSE_META_KEY_PREFIX = "homly_cached_house_meta_";
-const CACHED_HOUSE_MEMBERS_KEY_PREFIX = "homly_cached_house_members_";
-const CACHED_HOUSE_SECTIONS_KEY_PREFIX = "homly_cached_sections_";
-
-function getSelectedHouseStorageKey(userId: string) {
-  return `${SELECTED_HOUSE_KEY_PREFIX}${userId}`;
-}
-
-function getCachedHouseMetaStorageKey(userId: string) {
-  return `${CACHED_HOUSE_META_KEY_PREFIX}${userId}`;
-}
-
-function getCachedHouseMembersStorageKey(houseId: string) {
-  return `${CACHED_HOUSE_MEMBERS_KEY_PREFIX}${houseId}`;
-}
-
-function getCachedHouseSectionsStorageKey(houseId: string) {
-  return `${CACHED_HOUSE_SECTIONS_KEY_PREFIX}${houseId}`;
-}
-
-// appCacheStorage.setItem is now synchronous (fire-and-forget for Preferences),
-// so this wrapper is also effectively synchronous.
 function setPersistentCacheValue(key: string, value: string) {
   appCacheStorage.setItem(key, value);
 }
@@ -638,191 +90,6 @@ function setPersistentCacheValue(key: string, value: string) {
 function removePersistentCacheValue(key: string) {
   appCacheStorage.removeItem(key);
 }
-
-function toSortableId(sectionKey: SectionKey, itemId: number) {
-  return `${sectionKey}${SORTABLE_SEP}${itemId}`;
-}
-
-function fromSortableId(value: string): { sectionKey: SectionKey; itemId: number } | null {
-  const [rawSectionKey, rawItemId] = value.split(SORTABLE_SEP);
-  if (!rawSectionKey || !rawItemId) return null;
-  if (!sectionOrder.includes(rawSectionKey as SectionKey)) return null;
-  const itemId = Number(rawItemId);
-  if (!Number.isFinite(itemId)) return null;
-  return { sectionKey: rawSectionKey as SectionKey, itemId };
-}
-
-const SortableListItem = memo(function SortableListItem({
-  sortableId,
-  item,
-  sectionKey,
-  createdByAvatarUrl,
-  addedAtLabel,
-  onToggle,
-  onEdit,
-  onDelete,
-}: {
-  sortableId: string;
-  item: Item;
-  sectionKey: SectionKey;
-  createdByAvatarUrl?: string;
-  addedAtLabel: string;
-  onToggle: (key: SectionKey, id: number) => void;
-  onEdit: (key: SectionKey, id: number) => void;
-  onDelete: (key: SectionKey, id: number) => void;
-}) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({
-      id: sortableId,
-    });
-
-  const handleToggle = useCallback(() => onToggle(sectionKey, item.id), [onToggle, sectionKey, item.id]);
-  const handleEdit = useCallback(() => onEdit(sectionKey, item.id), [onEdit, sectionKey, item.id]);
-  const handleDelete = useCallback(() => onDelete(sectionKey, item.id), [onDelete, sectionKey, item.id]);
-
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 py-2 ${
-        isDragging ? "z-20 opacity-40 shadow-lg" : ""
-      }`}
-    >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        className="flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl border border-slate-200 text-slate-500 active:cursor-grabbing"
-        title="גרור לשינוי סדר"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-4 w-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="9" cy="6" r="1" />
-          <circle cx="9" cy="12" r="1" />
-          <circle cx="9" cy="18" r="1" />
-          <circle cx="15" cy="6" r="1" />
-          <circle cx="15" cy="12" r="1" />
-          <circle cx="15" cy="18" r="1" />
-        </svg>
-      </button>
-      <button type="button" onClick={handleToggle} className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-right">
-        <span className={`h-5 w-5 shrink-0 rounded-full border ${item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"}`} />
-        <span className="min-w-0 flex-1">
-          <span className={`block truncate text-sm ${item.completed ? "text-slate-400 line-through" : "text-slate-700"}`}>{item.text}</span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-            {createdByAvatarUrl ? (
-              <Image
-                loader={passthroughImageLoader}
-                unoptimized
-                src={createdByAvatarUrl}
-                alt="משתמש"
-                width={14}
-                height={14}
-                className="h-3.5 w-3.5 rounded-full object-cover"
-              />
-            ) : (
-              <span className="h-3.5 w-3.5 rounded-full bg-slate-300" />
-            )}
-            <span>{addedAtLabel}</span>
-          </span>
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={handleEdit}
-        aria-label="עריכה"
-        title="עריכה"
-        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-4 w-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="m12 20 7-7-3-3-7 7-1 4z" />
-          <path d="m15 7 3 3" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        onClick={handleDelete}
-        aria-label="מחיקה"
-        title="מחיקה"
-        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-4 w-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M3 6h18" />
-          <path d="M8 6V4h8v2" />
-          <path d="M19 6l-1 14H6L5 6" />
-          <path d="M10 11v6" />
-          <path d="M14 11v6" />
-        </svg>
-      </button>
-    </li>
-  );
-});
-
-// ── SectionInput ─────────────────────────────────────────────────────────────
-// Owns its own input value state so keystrokes don't re-render the entire page.
-
-type SectionInputHandle = { focus: () => void; submit: () => void };
-
-const SectionInput = memo(
-  forwardRef<SectionInputHandle, { placeholder: string; onAdd: (text: string) => void }>(
-    function SectionInput({ placeholder, onAdd }, ref) {
-      const [value, setValue] = useState("");
-      const inputRef = useRef<HTMLInputElement>(null);
-      const valueRef = useRef("");
-
-      const submit = useCallback(() => {
-        const text = valueRef.current.trim();
-        if (!text) return;
-        onAdd(text);
-        setValue("");
-        valueRef.current = "";
-      }, [onAdd]);
-
-      useImperativeHandle(ref, () => ({
-        focus: () => inputRef.current?.focus(),
-        submit,
-      }), [submit]);
-
-      return (
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => { valueRef.current = e.target.value; setValue(e.target.value); }}
-          placeholder={placeholder}
-          enterKeyHint="done"
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
-          className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-        />
-      );
-    },
-  ),
-);
 
 export default function HomePage() {
   const [isMobile, setIsMobile] = useState(true);
@@ -3505,354 +2772,71 @@ const saveUserProfileSettings = async () => {
 
   if (!activeUser) {
     return (
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-5 shadow-xl shadow-slate-200/70 sm:p-7">
-          <HomeLogo />
-          <p className="mt-3 text-sm text-slate-600">התחברות היא לפי משתמש אישי. אחרי זה נכנסים לבית.</p>
-
-          {isRecoveryMode && (
-            <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 p-3">
-              <p className="text-xs font-bold text-teal-700">איפוס סיסמה</p>
-              <p className="mt-1 text-xs text-teal-700">הכנס סיסמה חדשה כדי להשלים את תהליך האיפוס.</p>
-              <div className="mt-2 space-y-2">
-                <input
-                  value={recoveryPasswordInput}
-                  onChange={(event) => setRecoveryPasswordInput(event.target.value)}
-                  type="password"
-                  placeholder="סיסמה חדשה"
-                  className="min-h-11 w-full rounded-2xl border border-teal-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                />
-                <input
-                  value={recoveryPasswordConfirmInput}
-                  onChange={(event) => setRecoveryPasswordConfirmInput(event.target.value)}
-                  type="password"
-                  placeholder="אימות סיסמה חדשה"
-                  className="min-h-11 w-full rounded-2xl border border-teal-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                />
-                <button
-                  type="button"
-                  onClick={handleRecoveryPasswordUpdate}
-                  disabled={isRecoveryPasswordLoading}
-                  className="min-h-11 w-full rounded-2xl bg-teal-600 text-sm font-bold text-white disabled:opacity-50"
-                >
-                  {isRecoveryPasswordLoading ? "מעדכן..." : "עדכן סיסמה"}
-                </button>
-              </div>
-              {recoveryPasswordError && (
-                <p className="mt-2 text-xs font-bold text-rose-600">{recoveryPasswordError}</p>
-              )}
-              {recoveryPasswordFeedback && (
-                <p className="mt-2 text-xs font-bold text-teal-700">{recoveryPasswordFeedback}</p>
-              )}
-            </div>
-          )}
-
-          <div className="mt-4 flex gap-2 rounded-2xl bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("login");
-                setAuthError("");
-                setIsForgotPasswordOpen(false);
-              }}
-              className={`flex-1 rounded-xl py-2 text-sm font-bold ${
-                authMode === "login" ? "bg-white text-teal-700" : "text-slate-500"
-              }`}
-            >
-              התחברות משתמש
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("create");
-                setAuthError("");
-                setIsForgotPasswordOpen(false);
-              }}
-              className={`flex-1 rounded-xl py-2 text-sm font-bold ${
-                authMode === "create" ? "bg-white text-teal-700" : "text-slate-500"
-              }`}
-            >
-              יצירת משתמש
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            {authMode === "create" && (
-              <>
-                <input
-                  value={displayNameInput}
-                  onChange={(event) => setDisplayNameInput(event.target.value)}
-                  placeholder="שם מלא להצגה"
-                  className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                />
-                <input
-                  value={emailInput}
-                  onChange={(event) => setEmailInput(event.target.value)}
-                  type="email"
-                  dir="ltr"
-                  placeholder="אימייל (לכניסה ולאיפוס סיסמה)"
-                  className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                />
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-xs font-bold text-slate-600">תמונת פרופיל (אופציונלי)</p>
-                  <div className="flex items-center gap-3">
-                    {userAvatarInput ? (
-                      <Image
-                        loader={passthroughImageLoader}
-                        unoptimized
-                        src={userAvatarInput}
-                        alt="תמונת פרופיל"
-                        width={44}
-                        height={44}
-                        className="h-11 w-11 rounded-2xl border border-slate-200 object-cover"
-                      />
-                    ) : (
-                      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-100 text-sm font-bold text-teal-700">
-                        {displayNameInput.trim().slice(0, 1) || "?"}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={openUserAvatarPicker}
-                      disabled={isProcessingImage}
-                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
-                    >
-                      {isProcessingImage ? "מעבד תמונה..." : "העלאת תמונה"}
-                    </button>
-                    {userAvatarInput && (
-                      <button
-                        type="button"
-                        onClick={() => setUserAvatarInput("")}
-                        className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        הסרה
-                      </button>
-                    )}
-                    <input
-                      ref={userAvatarInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => handleUserAvatarFile(event.target.files?.[0])}
-                      className="hidden"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-            <input
-              value={usernameInput}
-              onChange={(event) => setUsernameInput(event.target.value)}
-              dir={authMode === "login" ? "rtl" : undefined}
-              placeholder={authMode === "create" ? "שם משתמש" : "מייל/שם משתמש"}
-              className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-right text-sm outline-none placeholder:text-right focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-            />
-            <input
-              value={userPasswordInput}
-              onChange={(event) => setUserPasswordInput(event.target.value)}
-              type="password"
-              placeholder="סיסמה"
-              className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-            />
-            <button
-              type="button"
-              onClick={authMode === "create" ? handleCreateUser : handleLoginUser}
-              disabled={authLoading}
-              className="min-h-11 w-full rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {authLoading
-                ? "טוען..."
-                : authMode === "create"
-                  ? "צור משתמש"
-                  : "התחבר"}
-            </button>
-            {authMode === "login" && (
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotPasswordIdentifier(usernameInput.includes("@") ? usernameInput : "");
-                  setForgotPasswordError("");
-                  setForgotPasswordFeedback("");
-                  setIsForgotPasswordOpen(true);
-                }}
-                className="w-full text-center text-xs font-bold text-slate-500 underline-offset-2 transition hover:text-slate-700 hover:underline"
-              >
-                שכחתי סיסמה
-              </button>
-            )}
-          </div>
-
-          {authError && <p className="mt-3 text-xs font-bold text-rose-600">{authError}</p>}
-          {recoveryPasswordFeedback && (
-            <p className="mt-3 text-xs font-bold text-teal-700">{recoveryPasswordFeedback}</p>
-          )}
-          {isForgotPasswordOpen && (
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-bold text-slate-700">שחזור סיסמה</p>
-                <button
-                  type="button"
-                  onClick={() => setIsForgotPasswordOpen(false)}
-                  className="rounded-xl bg-white px-2 py-1 text-[11px] font-bold text-slate-600"
-                >
-                  סגור
-                </button>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                הזן אימייל הרשמה. נשלח קישור לאיפוס סיסמה.
-              </p>
-              <input
-                value={forgotPasswordIdentifier}
-                onChange={(event) => setForgotPasswordIdentifier(event.target.value)}
-                type="email"
-                dir="ltr"
-                placeholder="אימייל"
-                className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-              />
-              <button
-                type="button"
-                onClick={handleForgotPassword}
-                disabled={isForgotPasswordLoading}
-                className="mt-2 min-h-11 w-full rounded-2xl bg-slate-900 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {isForgotPasswordLoading ? "שולח..." : "שלח קישור איפוס"}
-              </button>
-              {forgotPasswordError && (
-                <p className="mt-2 text-xs font-bold text-rose-600">{forgotPasswordError}</p>
-              )}
-              {forgotPasswordFeedback && (
-                <p className="mt-2 text-xs font-bold text-teal-700">{forgotPasswordFeedback}</p>
-              )}
-            </div>
-          )}
-        </section>
-      </main>
+      <AuthScreen
+        authMode={authMode}
+        usernameInput={usernameInput}
+        emailInput={emailInput}
+        userPasswordInput={userPasswordInput}
+        displayNameInput={displayNameInput}
+        userAvatarInput={userAvatarInput}
+        isProcessingImage={isProcessingImage}
+        authError={authError}
+        authLoading={authLoading}
+        isForgotPasswordOpen={isForgotPasswordOpen}
+        forgotPasswordIdentifier={forgotPasswordIdentifier}
+        forgotPasswordError={forgotPasswordError}
+        forgotPasswordFeedback={forgotPasswordFeedback}
+        isForgotPasswordLoading={isForgotPasswordLoading}
+        isRecoveryMode={isRecoveryMode}
+        recoveryPasswordInput={recoveryPasswordInput}
+        recoveryPasswordConfirmInput={recoveryPasswordConfirmInput}
+        recoveryPasswordError={recoveryPasswordError}
+        recoveryPasswordFeedback={recoveryPasswordFeedback}
+        isRecoveryPasswordLoading={isRecoveryPasswordLoading}
+        setAuthMode={setAuthMode}
+        setAuthError={setAuthError}
+        setUsernameInput={setUsernameInput}
+        setEmailInput={setEmailInput}
+        setUserPasswordInput={setUserPasswordInput}
+        setDisplayNameInput={setDisplayNameInput}
+        setUserAvatarInput={setUserAvatarInput}
+        setIsForgotPasswordOpen={setIsForgotPasswordOpen}
+        setForgotPasswordIdentifier={setForgotPasswordIdentifier}
+        setForgotPasswordError={setForgotPasswordError}
+        setForgotPasswordFeedback={setForgotPasswordFeedback}
+        setRecoveryPasswordInput={setRecoveryPasswordInput}
+        setRecoveryPasswordConfirmInput={setRecoveryPasswordConfirmInput}
+        handleCreateUser={handleCreateUser}
+        handleLoginUser={handleLoginUser}
+        handleForgotPassword={handleForgotPassword}
+        handleRecoveryPasswordUpdate={handleRecoveryPasswordUpdate}
+        handleUserAvatarFile={handleUserAvatarFile}
+        openUserAvatarPicker={openUserAvatarPicker}
+        userAvatarInputRef={userAvatarInputRef}
+      />
     );
   }
 
   if (!activeHouse) {
     if (isHouseLoading) {
-      return (
-        <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-          <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
-            <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
-            <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
-            <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
-            <LoadingBar />
-            {houseMembers.length > 0 && (
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {houseMembers.slice(0, 4).map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
-                  >
-                    <SafeImage
-                      src={member.avatar_url}
-                      alt={member.display_name}
-                      width={28}
-                      height={28}
-                      className="h-7 w-7 rounded-xl object-cover"
-                      fallback={
-                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                          {member.display_name.slice(0, 1)}
-                        </span>
-                      }
-                    />
-                    <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </main>
-      );
+      return <HouseLoadingScreen cachedHouseMeta={cachedHouseMeta} houseMembers={houseMembers} />;
     }
 
     return (
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-2xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-5 shadow-xl shadow-slate-200/70 sm:p-7">
-          <div className="flex items-center gap-3">
-            <SafeImage
-              src={activeUser.avatar_url}
-              alt="תמונת משתמש"
-              width={52}
-              height={52}
-              className="h-13 w-13 rounded-2xl border border-slate-200 object-cover"
-              fallback={
-                <span className="flex h-13 w-13 items-center justify-center rounded-2xl bg-teal-100 text-lg font-bold text-teal-700">
-                  {activeUser.display_name.slice(0, 1)}
-                </span>
-              }
-            />
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">{activeUser.display_name}</h2>
-              <p className="text-xs font-bold text-slate-500">@{activeUser.username}</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-800">יצירת בית חדש</p>
-              <input
-                value={houseCreateNameInput}
-                onChange={(event) => setHouseCreateNameInput(event.target.value)}
-                placeholder="שם הבית"
-                className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-              />
-              <button
-                type="button"
-                onClick={handleCreateHouse}
-                disabled={houseCreateLoading}
-                className="mt-2 min-h-11 w-full rounded-2xl bg-slate-900 px-4 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {houseCreateLoading ? "יוצר..." : "צור בית"}
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-800">הצטרפות לבית קיים</p>
-              <input
-                value={joinTokenInput}
-                onChange={(event) => setJoinTokenInput(event.target.value.toUpperCase())}
-                placeholder="קוד הזמנה"
-                className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm uppercase outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  void handleJoinHouseByToken();
-                }}
-                disabled={joinLoading}
-                className="mt-2 min-h-11 w-full rounded-2xl bg-teal-600 px-4 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {joinLoading ? "מצרף..." : "הצטרף לבית"}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-sm font-bold text-slate-800">הבתים שלי</p>
-            {memberHouses.length === 0 ? (
-              <p className="mt-2 text-xs font-bold text-slate-500">עדיין אין לך בתים. צור בית או הצטרף בהזמנה.</p>
-            ) : (
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {memberHouses.map((house) => (
-                  <button
-                    key={house.id}
-                    type="button"
-                    onClick={() => applyActiveHouse(house)}
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right transition hover:bg-slate-100"
-                  >
-                    <p className="text-sm font-bold text-slate-900">{house.name}</p>
-                    <p className="text-xs font-bold text-slate-500">{house.id}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {houseListError && <p className="mt-3 text-xs font-bold text-rose-600">{houseListError}</p>}
-        </section>
-      </main>
+      <HouseSelectorScreen
+        activeUser={activeUser}
+        houseCreateNameInput={houseCreateNameInput}
+        setHouseCreateNameInput={setHouseCreateNameInput}
+        handleCreateHouse={handleCreateHouse}
+        houseCreateLoading={houseCreateLoading}
+        joinTokenInput={joinTokenInput}
+        setJoinTokenInput={setJoinTokenInput}
+        handleJoinHouseByToken={handleJoinHouseByToken}
+        joinLoading={joinLoading}
+        memberHouses={memberHouses}
+        applyActiveHouse={applyActiveHouse}
+        houseListError={houseListError}
+      />
     );
   }
 

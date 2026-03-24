@@ -19,6 +19,7 @@ export const SELECTED_HOUSE_KEY_PREFIX = "homly_selected_house_";
 export const CACHED_USER_KEY = "homly_cached_user";
 export const CACHED_HOUSE_META_KEY_PREFIX = "homly_cached_house_meta_";
 export const CACHED_HOUSE_MEMBERS_KEY_PREFIX = "homly_cached_house_members_";
+export const CACHED_HOUSE_SECTIONS_KEY_PREFIX = "homly_cached_sections_";
 
 const defaultCreatedAt = new Date().toISOString();
 

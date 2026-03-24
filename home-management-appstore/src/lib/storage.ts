@@ -3,6 +3,7 @@ import {
   SELECTED_HOUSE_KEY_PREFIX,
   CACHED_HOUSE_META_KEY_PREFIX,
   CACHED_HOUSE_MEMBERS_KEY_PREFIX,
+  CACHED_HOUSE_SECTIONS_KEY_PREFIX,
 } from "@/lib/constants";
 
 export function getSelectedHouseStorageKey(userId: string) {
@@ -15,6 +16,10 @@ export function getCachedHouseMetaStorageKey(userId: string) {
 
 export function getCachedHouseMembersStorageKey(houseId: string) {
   return `${CACHED_HOUSE_MEMBERS_KEY_PREFIX}${houseId}`;
+}
+
+export function getCachedHouseSectionsStorageKey(houseId: string) {
+  return `${CACHED_HOUSE_SECTIONS_KEY_PREFIX}${houseId}`;
 }
 
 export async function setPersistentCacheValue(key: string, value: string) {

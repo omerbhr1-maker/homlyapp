@@ -11,7 +11,7 @@ import type {
   RecipeQuestionKind,
   RecipeAnswerValue,
 } from "@/types";
-import { initialSections } from "@/lib/constants";
+import { initialSections, SORTABLE_SEP, sectionOrder } from "@/lib/constants";
 
 export const passthroughImageLoader = ({ src }: ImageLoaderProps) => src;
 
@@ -231,4 +231,17 @@ export function cloneSections(source: Record<SectionKey, Section>): Record<Secti
       items: source.supermarketShopping.items.map((item) => ({ ...item })),
     },
   };
+}
+
+export function toSortableId(sectionKey: SectionKey, itemId: number) {
+  return `${sectionKey}${SORTABLE_SEP}${itemId}`;
+}
+
+export function fromSortableId(value: string): { sectionKey: SectionKey; itemId: number } | null {
+  const [rawSectionKey, rawItemId] = value.split(SORTABLE_SEP);
+  if (!rawSectionKey || !rawItemId) return null;
+  if (!sectionOrder.includes(rawSectionKey as SectionKey)) return null;
+  const itemId = Number(rawItemId);
+  if (!Number.isFinite(itemId)) return null;
+  return { sectionKey: rawSectionKey as SectionKey, itemId };
 }
