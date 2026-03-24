@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, lazy, memo, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import Image, { type ImageLoaderProps } from "next/image";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
 import {
@@ -629,36 +629,14 @@ function getCachedHouseSectionsStorageKey(houseId: string) {
   return `${CACHED_HOUSE_SECTIONS_KEY_PREFIX}${houseId}`;
 }
 
-async function setPersistentCacheValue(key: string, value: string) {
-  try {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(key, value);
-    }
-  } catch {
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem(key);
-      } catch {
-        // Ignore cleanup failures.
-      }
-    }
-  }
-  try {
-    await appCacheStorage.setItem(key, value);
-  } catch {
-    try {
-      await appCacheStorage.removeItem(key);
-    } catch {
-      // Ignore cleanup failures.
-    }
-  }
+// appCacheStorage.setItem is now synchronous (fire-and-forget for Preferences),
+// so this wrapper is also effectively synchronous.
+function setPersistentCacheValue(key: string, value: string) {
+  appCacheStorage.setItem(key, value);
 }
 
-async function removePersistentCacheValue(key: string) {
-  if (typeof window !== "undefined") {
-    window.localStorage.removeItem(key);
-  }
-  await appCacheStorage.removeItem(key);
+function removePersistentCacheValue(key: string) {
+  appCacheStorage.removeItem(key);
 }
 
 function toSortableId(sectionKey: SectionKey, itemId: number) {
@@ -806,6 +784,46 @@ const SortableListItem = memo(function SortableListItem({
   );
 });
 
+// ── SectionInput ─────────────────────────────────────────────────────────────
+// Owns its own input value state so keystrokes don't re-render the entire page.
+
+type SectionInputHandle = { focus: () => void; submit: () => void };
+
+const SectionInput = memo(
+  forwardRef<SectionInputHandle, { placeholder: string; onAdd: (text: string) => void }>(
+    function SectionInput({ placeholder, onAdd }, ref) {
+      const [value, setValue] = useState("");
+      const inputRef = useRef<HTMLInputElement>(null);
+      const valueRef = useRef("");
+
+      const submit = useCallback(() => {
+        const text = valueRef.current.trim();
+        if (!text) return;
+        onAdd(text);
+        setValue("");
+        valueRef.current = "";
+      }, [onAdd]);
+
+      useImperativeHandle(ref, () => ({
+        focus: () => inputRef.current?.focus(),
+        submit,
+      }), [submit]);
+
+      return (
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => { valueRef.current = e.target.value; setValue(e.target.value); }}
+          placeholder={placeholder}
+          enterKeyHint="done"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+          className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+        />
+      );
+    },
+  ),
+);
+
 export default function HomePage() {
   const [isMobile, setIsMobile] = useState(true);
   const [isSpeechSupported, setIsSpeechSupported] = useState(false);
@@ -873,6 +891,7 @@ export default function HomePage() {
   const [activeRecording, setActiveRecording] = useState<SectionKey | null>(null);
   const [ptrDist, setPtrDist] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isPtrDone, setIsPtrDone] = useState(false);
   const ptrStartYRef = useRef(0);
   const ptrAtTopRef = useRef(false);
   const mainScrollRef = useRef<HTMLElement>(null);
@@ -880,6 +899,7 @@ export default function HomePage() {
   const [isNavHidden, setIsNavHidden] = useState(false);
   const [navDragY, setNavDragY] = useState(0);
   const navDragStartRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -894,12 +914,6 @@ export default function HomePage() {
   const [recipeRecording, setRecipeRecording] = useState(false);
   const [dragOverlayItem, setDragOverlayItem] = useState<Item | null>(null);
 
-  const [inputs, setInputs] = useState<Record<SectionKey, string>>({
-    homeTasks: "",
-    generalShopping: "",
-    supermarketShopping: "",
-  });
-
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const transcriptBufferRef = useRef("");
   const recordingSectionRef = useRef<SectionKey | null>(null);
@@ -908,7 +922,7 @@ export default function HomePage() {
   const userAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const userProfileImageInputRef = useRef<HTMLInputElement | null>(null);
   const desktopSearchRef = useRef<HTMLInputElement | null>(null);
-  const sectionInputRefs = useRef<Record<SectionKey, HTMLInputElement | null>>({
+  const sectionInputRefs = useRef<Record<SectionKey, SectionInputHandle | null>>({
     homeTasks: null,
     generalShopping: null,
     supermarketShopping: null,
@@ -949,6 +963,40 @@ export default function HomePage() {
     () => new Map(houseMembers.map((m) => [m.id, m])),
     [houseMembers],
   );
+
+  const sectionStats = useMemo(() => {
+    const q = desktopQuery.trim().toLowerCase();
+    return Object.fromEntries(
+      sectionOrder.map((key) => {
+        const items = sections[key].items;
+        const visibleItems = items.filter((item) => {
+          if (desktopFilter === "open" && item.completed) return false;
+          if (desktopFilter === "done" && !item.completed) return false;
+          if (!q) return true;
+          return item.text.toLowerCase().includes(q);
+        });
+        const doneCount = items.filter((item) => item.completed).length;
+        const progress = items.length ? Math.round((doneCount / items.length) * 100) : 0;
+        return [key, { visibleItems, doneCount, progress }];
+      }),
+    ) as Record<SectionKey, { visibleItems: Item[]; doneCount: number; progress: number }>;
+  }, [sections, desktopFilter, desktopQuery]);
+
+  // Surface any unhandled JS errors to the Xcode console for easier debugging.
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      console.error("[HomlyError]", event.message, event.filename, event.lineno, event.error);
+    };
+    const onUnhandled = (event: PromiseRejectionEvent) => {
+      console.error("[HomlyUnhandledRejection]", event.reason);
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandled);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1759,12 +1807,13 @@ export default function HomePage() {
     setUndoState(null);
   };
 
-  const addBatchItems = (key: SectionKey, items: string[], undoLabel = "נוספו פריטים") => {
+  const addBatchItems = useCallback((key: SectionKey, items: string[], undoLabel = "נוספו פריטים") => {
     const cleanItems = items.map((item) => item.trim()).filter(Boolean);
     if (cleanItems.length === 0) return;
     pushUndoState(undoLabel);
 
     setSections((prev) => {
+      const user = activeUserRef.current;
       const maxId =
         prev[key].items.length > 0
           ? Math.max(...prev[key].items.map((item) => item.id))
@@ -1774,8 +1823,8 @@ export default function HomePage() {
         id: maxId + index + 1,
         text,
         completed: false,
-        createdByUserId: activeUser?.id,
-        createdByName: activeUser?.display_name || "לא ידוע",
+        createdByUserId: user?.id,
+        createdByName: user?.display_name || "לא ידוע",
         createdAt: new Date().toISOString(),
       }));
 
@@ -1787,7 +1836,7 @@ export default function HomePage() {
         },
       };
     });
-  };
+  }, [pushUndoState]);
 
   const finalizeRecording = async () => {
     const sectionKey = recordingSectionRef.current;
@@ -1921,19 +1970,11 @@ export default function HomePage() {
     setRecipeRecording(true);
   };
 
-  const handleAddItem = (key: SectionKey) => {
-    const text = inputs[key].trim();
-    if (!text) return;
-
+  // Called by SectionInput.onAdd — text is already trimmed and non-empty.
+  const handleAddItem = useCallback((key: SectionKey, text: string) => {
     void hapticLight();
     addBatchItems(key, [text], "נוסף פריט");
-    setInputs((prev) => ({ ...prev, [key]: "" }));
-  };
-
-  const handleSubmit = (event: { preventDefault(): void }, key: SectionKey) => {
-    event.preventDefault();
-    handleAddItem(key);
-  };
+  }, [addBatchItems]);
 
   const toggleComplete = useCallback((key: SectionKey, id: number) => {
     const isCompleting = !sectionsRef.current[key].items.find((i) => i.id === id)?.completed;
@@ -2006,13 +2047,6 @@ export default function HomePage() {
     });
   }, [pushUndoState]);
 
-  const getVisibleItems = (items: Item[]) =>
-    items.filter((item) => {
-      if (desktopFilter === "open" && item.completed) return false;
-      if (desktopFilter === "done" && !item.completed) return false;
-      if (!desktopQuery.trim()) return true;
-      return item.text.toLowerCase().includes(desktopQuery.trim().toLowerCase());
-    });
 
   const reorderWithinSection = (
     key: SectionKey,
@@ -2586,6 +2620,8 @@ const saveUserProfileSettings = async () => {
       lastAcceptedCloudUpdatedAtRef.current = "";
       if (userId) await loadUserHouses(userId, houseId, true);
       setIsRefreshing(false);
+      setIsPtrDone(true);
+      setTimeout(() => setIsPtrDone(false), 900);
     } else {
       setPtrDist(0);
     }
@@ -2607,6 +2643,21 @@ const saveUserProfileSettings = async () => {
       setNavDragY(0);
     }
   };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.scrollY;
+      const prev = lastScrollTopRef.current;
+      if (scrollTop > prev && scrollTop > 50) {
+        setIsNavHidden(true);
+      } else if (scrollTop < prev) {
+        setIsNavHidden(false);
+      }
+      lastScrollTopRef.current = scrollTop;
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const applyActiveHouse = (house: CloudHouseRow) => {
     // Discard stale data: if the incoming timestamp is older than (or equal to) what we
@@ -3814,15 +3865,15 @@ const saveUserProfileSettings = async () => {
       onTouchEnd={() => { void handlePtrEnd(); }}
     >
       {/* Pull-to-refresh indicator */}
-      {(ptrDist > 0 || isRefreshing) && (() => {
+      {(ptrDist > 0 || isRefreshing || isPtrDone) && (() => {
         const progress = Math.min(ptrDist / PTR_THRESHOLD, 1);
         const r = 14;
         const circumference = 2 * Math.PI * r;
-        const dashOffset = isRefreshing ? 0 : circumference * (1 - progress);
+        const dashOffset = (isRefreshing || isPtrDone) ? 0 : circumference * (1 - progress);
         return (
           <div
             className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center"
-            style={{ paddingTop: `${isRefreshing ? 14 : Math.max(4, ptrDist * 0.5)}px`, transition: "padding-top 0.15s" }}
+            style={{ paddingTop: `${(isRefreshing || isPtrDone) ? 14 : Math.max(4, ptrDist * 0.5)}px`, transition: "padding-top 0.15s" }}
           >
             <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200">
               <svg
@@ -3833,16 +3884,22 @@ const saveUserProfileSettings = async () => {
                 <circle
                   cx="17" cy="17" r={r}
                   fill="none"
-                  stroke={isRefreshing || progress >= 1 ? "#14b8a6" : "#94a3b8"}
+                  stroke={(isRefreshing || isPtrDone || progress >= 1) ? "#14b8a6" : "#94a3b8"}
                   strokeWidth="2.5"
                   strokeLinecap="round"
                   strokeDasharray={`${circumference}`}
                   strokeDashoffset={`${dashOffset}`}
                 />
               </svg>
-              <svg viewBox="0 0 24 24" className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
+              {isPtrDone ? (
+                <svg viewBox="0 0 24 24" className="relative z-10 h-4 w-4 text-teal-500" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              )}
             </div>
           </div>
         );
@@ -4054,11 +4111,7 @@ const saveUserProfileSettings = async () => {
             {sectionOrder.map((key) => {
               const section = sections[key];
               const isRecordingHere = activeRecording === key;
-              const visibleItems = getVisibleItems(section.items);
-              const doneCount = section.items.filter((item) => item.completed).length;
-              const progress = section.items.length
-                ? Math.round((doneCount / section.items.length) * 100)
-                : 0;
+              const { visibleItems, progress } = sectionStats[key];
 
               return (
                 <article key={key} id={sectionAnchors[key]} className="scroll-mt-32 rounded-3xl border border-white/80 bg-white/90 p-4 shadow-lg shadow-slate-200/70 backdrop-blur sm:p-5 lg:flex lg:min-h-[38rem] lg:flex-col">
@@ -4075,18 +4128,12 @@ const saveUserProfileSettings = async () => {
                     </div>
                   </div>
 
-                  <form className="mb-4 flex flex-col gap-2" onSubmit={(event) => handleSubmit(event, key)}>
+                  <div className="mb-4 flex flex-col gap-2">
                     <div className="flex items-center gap-2">
-                      <input
-                        ref={(node) => {
-                          sectionInputRefs.current[key] = node;
-                        }}
-                        value={inputs[key]}
-                        onChange={(event) => setInputs((prev) => ({ ...prev, [key]: event.target.value }))}
+                      <SectionInput
+                        ref={(node) => { sectionInputRefs.current[key] = node; }}
                         placeholder={section.placeholder}
-                        enterKeyHint="done"
-                        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); handleAddItem(key); } }}
-                        className="min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                        onAdd={(text) => handleAddItem(key, text)}
                       />
                       {key === "supermarketShopping" && (
                         <button
@@ -4117,8 +4164,8 @@ const saveUserProfileSettings = async () => {
                         {isRecordingHere ? <AudioWaveIcon /> : <MicIcon />}
                       </button>
                     </div>
-                    <button type="submit" className="min-h-11 rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 px-4 py-2 text-sm font-bold text-white transition hover:opacity-90">הוספה</button>
-                  </form>
+                    <button type="button" onClick={() => sectionInputRefs.current[key]?.submit()} className="min-h-11 rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 px-4 py-2 text-sm font-bold text-white transition hover:opacity-90">הוספה</button>
+                  </div>
 
                   {isRecordingHere && <p className="mb-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600">מקליט... עצירה בלחיצה חוזרת על המיקרופון.</p>}
                   {processingRecording === key && (
