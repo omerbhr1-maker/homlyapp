@@ -198,6 +198,20 @@ export default function HomePage() {
     generalShopping: null,
     supermarketShopping: null,
   });
+  // Stable setters so SectionCard's memo is not defeated by inline lambdas.
+  // sectionOrder is a constant and sectionInputRefs is a ref — both stable forever.
+  const sectionInputRefSetters = useMemo(
+    () =>
+      Object.fromEntries(
+        sectionOrder.map((key) => [
+          key,
+          (node: SectionInputHandle | null) => {
+            sectionInputRefs.current[key] = node;
+          },
+        ]),
+      ) as Record<SectionKey, (node: SectionInputHandle | null) => void>,
+    [],
+  );
   const autoJoinFromLinkDoneRef = useRef(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeAuthUserIdRef = useRef<string | null>(null);
@@ -1196,7 +1210,7 @@ export default function HomePage() {
     startRecording(key);
   };
 
-  const toggleRecipeRecording = () => {
+  const toggleRecipeRecording = useCallback(() => {
     const speechWindow = window as Window & {
       SpeechRecognition?: SpeechRecognitionCtor;
       webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -1240,7 +1254,7 @@ export default function HomePage() {
     recipeRecognitionRef.current = recognition;
     recognition.start();
     setRecipeRecording(true);
-  };
+  }, [recipeRecording]);
 
   // Called by SectionInput.onAdd — text is already trimmed and non-empty.
   const handleAddItem = useCallback((key: SectionKey, text: string) => {
@@ -1776,14 +1790,14 @@ const saveUserProfileSettings = async () => {
     }
   };
 
-  const addRecipeItemsToSupermarket = () => {
+  const addRecipeItemsToSupermarket = useCallback(() => {
     addBatchItems("supermarketShopping", recipeItems, "נוספו פריטי מתכון");
     setRecipeItems([]);
     setRecipeQuestions([]);
     setRecipeAnswers({});
     setRecipeText("");
     setIsRecipeModalOpen(false);
-  };
+  }, [recipeItems, addBatchItems]);
 
 
   const applyActiveHouse = (house: CloudHouseRow) => {
@@ -2389,8 +2403,10 @@ const saveUserProfileSettings = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeUser?.id]);
 
-  const removeMember = async (memberId: string) => {
+  const removeMember = useCallback(async (memberId: string) => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     if (activeHouse.owner_user_id !== activeUser.id) return;
     if (memberId === activeUser.id) return;
@@ -2402,7 +2418,7 @@ const saveUserProfileSettings = async () => {
     if (!error) {
       await loadHouseMembers(activeHouse.id);
     }
-  };
+  }, []);
 
   const leaveHouse = async () => {
     const client = supabase;
@@ -2783,7 +2799,7 @@ const saveUserProfileSettings = async () => {
                 onDelete={deleteItem}
                 onToggleRecording={toggleRecording}
                 onOpenRecipeModal={openRecipeModal}
-                externalInputRefSetter={(node) => { sectionInputRefs.current[key] = node; }}
+                externalInputRefSetter={sectionInputRefSetters[key]}
               />
             ))}
           </section>
