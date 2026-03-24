@@ -13,9 +13,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import {
-  SortableContext,
   arrayMove,
-  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import type { User } from "@supabase/supabase-js";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
@@ -53,14 +51,12 @@ import {
   toCachedUser,
   toCachedHouseMeta,
   toCachedHouseMembers,
-  formatAddedAt,
   normalizeRecipeQuestions,
   getRecipeAnswerValues,
   isRecipeAnswerMissing,
   getDefaultSectionItems,
   normalizeCloudSections,
   cloneSections,
-  toSortableId,
   fromSortableId,
 } from "@/lib/utils";
 import {
@@ -69,17 +65,18 @@ import {
   getCachedHouseMembersStorageKey,
   getCachedHouseSectionsStorageKey,
 } from "@/lib/storage";
-import { SafeImage } from "@/components/SafeImage";
 import { HomeLogo } from "@/components/HomeLogo";
 import { LoadingBar } from "@/components/LoadingBar";
-import { AudioWaveIcon, MicIcon, RecipeIcon } from "@/components/icons";
-import { SortableListItem } from "@/components/SortableListItem";
-import { SectionInput, type SectionInputHandle } from "@/components/SectionInput";
+import { type SectionInputHandle } from "@/components/SectionInput";
 import { AuthScreen } from "@/components/AuthScreen";
 import { HouseLoadingScreen } from "@/components/HouseLoadingScreen";
 import { HouseSelectorScreen } from "@/components/HouseSelectorScreen";
 import { BottomNav } from "@/components/BottomNav";
 import { UserProfileModal } from "@/components/UserProfileModal";
+import { PullToRefreshIndicator } from "@/components/PullToRefreshIndicator";
+import { HouseHeader } from "@/components/HouseHeader";
+import { HouseMembersSection } from "@/components/HouseMembersSection";
+import { SectionCard } from "@/components/SectionCard";
 
 const RecipeModal = lazy(() => import("@/components/RecipeModal").then((m) => ({ default: m.RecipeModal })));
 const InviteModal = lazy(() => import("@/components/InviteModal").then((m) => ({ default: m.InviteModal })));
@@ -1316,6 +1313,14 @@ export default function HomePage() {
     });
   }, [pushUndoState]);
 
+  const openRecipeModal = useCallback(() => {
+    setRecipeError("");
+    setRecipeNotes("");
+    setRecipeQuestions([]);
+    setRecipeItems([]);
+    setRecipeAnswers({});
+    setIsRecipeModalOpen(true);
+  }, []);
 
   const reorderWithinSection = (
     key: SectionKey,
@@ -2850,176 +2855,26 @@ const saveUserProfileSettings = async () => {
       onTouchMove={handlePtrMove}
       onTouchEnd={() => { void handlePtrEnd(); }}
     >
-      {/* Pull-to-refresh indicator */}
-      {(ptrDist > 0 || isRefreshing || isPtrDone) && (() => {
-        const progress = Math.min(ptrDist / PTR_THRESHOLD, 1);
-        const r = 14;
-        const circumference = 2 * Math.PI * r;
-        const dashOffset = (isRefreshing || isPtrDone) ? 0 : circumference * (1 - progress);
-        return (
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center"
-            style={{ paddingTop: `${(isRefreshing || isPtrDone) ? 14 : Math.max(4, ptrDist * 0.5)}px`, transition: "padding-top 0.15s" }}
-          >
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200">
-              <svg
-                viewBox="0 0 34 34"
-                className={`absolute inset-0 h-full w-full -rotate-90 ${isRefreshing ? "animate-spin" : ""}`}
-              >
-                <circle cx="17" cy="17" r={r} fill="none" stroke="#e2e8f0" strokeWidth="2" />
-                <circle
-                  cx="17" cy="17" r={r}
-                  fill="none"
-                  stroke={(isRefreshing || isPtrDone || progress >= 1) ? "#14b8a6" : "#94a3b8"}
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeDasharray={`${circumference}`}
-                  strokeDashoffset={`${dashOffset}`}
-                />
-              </svg>
-              {isPtrDone ? (
-                <svg viewBox="0 0 24 24" className="relative z-10 h-4 w-4 text-teal-500" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-              )}
-            </div>
-          </div>
-        );
-      })()}
-      <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur sm:mb-7 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <HomeLogo houseName={activeHouse.name} houseImage={activeHouse.house_image} />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsUserProfileOpen(true)}
-              className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-1 lg:flex"
-            >
-              <SafeImage
-                src={activeUser.avatar_url}
-                alt="תמונת משתמש"
-                width={28}
-                height={28}
-                className="h-7 w-7 rounded-xl object-cover"
-                fallback={
-                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                    {activeUser.display_name.slice(0, 1)}
-                  </span>
-                }
-              />
-              <span className="text-xs font-bold text-slate-700">{activeUser.display_name}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z" />
-              </svg>
-              הגדרות
-            </button>
-          </div>
-        </div>
-      </header>
+      <PullToRefreshIndicator
+        ptrDist={ptrDist}
+        isRefreshing={isRefreshing}
+        isPtrDone={isPtrDone}
+        ptrThreshold={PTR_THRESHOLD}
+      />
+      <HouseHeader
+        activeHouse={activeHouse}
+        activeUser={activeUser}
+        onOpenUserProfile={() => setIsUserProfileOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
 
-      <section className="mb-4 rounded-3xl border border-white/80 bg-white/95 p-3 shadow-lg shadow-slate-200/70">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-bold text-slate-500">אנשים בבית</p>
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
-              {isHouseMembersLoading && houseMembers.length === 0
-                ? "טוען אנשים..."
-                : `${houseMembers.length} משתמשים`}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                void openInviteModal();
-              }}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
-              title="שיתוף הזמנה לבית"
-              aria-label="שיתוף הזמנה לבית"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="18" cy="5" r="3" />
-                <circle cx="6" cy="12" r="3" />
-                <circle cx="18" cy="19" r="3" />
-                <path d="m8.6 13.5 6.8 3.9" />
-                <path d="m15.4 6.6-6.8 3.8" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {isHouseMembersLoading && houseMembers.length === 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
-              טוען את אנשי הבית...
-            </div>
-          )}
-          {houseMembers.map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-2 py-1.5"
-            >
-              <SafeImage
-                src={member.avatar_url}
-                alt={member.display_name}
-                width={28}
-                height={28}
-                className="h-7 w-7 rounded-xl object-cover"
-                fallback={
-                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
-                    {member.display_name.slice(0, 1)}
-                  </span>
-                }
-              />
-              <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
-              {member.role === "owner" && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                  בעל הבית
-                </span>
-              )}
-              {activeHouse?.owner_user_id === activeUser?.id && member.role !== "owner" && (
-                <button
-                  type="button"
-                  onClick={() => void removeMember(member.id)}
-                  className="mr-auto rounded-lg bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-600 transition hover:bg-rose-100"
-                  title="הסר מהבית"
-                >
-                  הסר
-                </button>
-              )}
-            </div>
-          ))}
-          {houseMembers.length === 0 && (
-            <p className="text-xs font-bold text-slate-500">עדיין אין חברים בבית הזה.</p>
-          )}
-        </div>
-      </section>
+      <HouseMembersSection
+        houseMembers={houseMembers}
+        isHouseMembersLoading={isHouseMembersLoading}
+        isOwner={activeHouse?.owner_user_id === activeUser?.id}
+        openInviteModal={() => void openInviteModal()}
+        removeMember={removeMember}
+      />
 
       <div>
         <div className="mb-4 hidden grid-cols-1 gap-3 lg:grid lg:grid-cols-[1.2fr_1fr]">
@@ -3094,110 +2949,28 @@ const saveUserProfileSettings = async () => {
           onDragCancel={handleDragCancel}
         >
           <section className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {sectionOrder.map((key) => {
-              const section = sections[key];
-              const isRecordingHere = activeRecording === key;
-              const { visibleItems, progress } = sectionStats[key];
-
-              return (
-                <article key={key} id={sectionAnchors[key]} className="scroll-mt-32 rounded-3xl border border-white/80 bg-white/90 p-4 shadow-lg shadow-slate-200/70 backdrop-blur sm:p-5 lg:flex lg:min-h-[38rem] lg:flex-col">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-slate-900">{section.title}</h2>
-                    <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700">{section.items.length} פריטים</span>
-                  </div>
-                  <div className="mb-4">
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-l from-teal-500 to-cyan-500 transition-all"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mb-4 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <SectionInput
-                        ref={(node) => { sectionInputRefs.current[key] = node; }}
-                        placeholder={section.placeholder}
-                        onAdd={(text) => handleAddItem(key, text)}
-                      />
-                      {key === "supermarketShopping" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRecipeError("");
-                            setRecipeNotes("");
-                            setRecipeQuestions([]);
-                            setRecipeItems([]);
-                            setRecipeAnswers({});
-                            setIsRecipeModalOpen(true);
-                          }}
-                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"
-                          title="מתכון חכם"
-                        >
-                          <RecipeIcon />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => toggleRecording(key)}
-                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition ${
-                          isRecordingHere
-                            ? "border-rose-300 bg-rose-500 text-white shadow-lg shadow-rose-200"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                        } ${!isSpeechSupported ? "pointer-events-none opacity-40" : ""}`}
-                      >
-                        {isRecordingHere ? <AudioWaveIcon /> : <MicIcon />}
-                      </button>
-                    </div>
-                    <button type="button" onClick={() => sectionInputRefs.current[key]?.submit()} className="min-h-11 rounded-2xl bg-gradient-to-l from-teal-600 to-cyan-600 px-4 py-2 text-sm font-bold text-white transition hover:opacity-90">הוספה</button>
-                  </div>
-
-                  {isRecordingHere && <p className="mb-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600">מקליט... עצירה בלחיצה חוזרת על המיקרופון.</p>}
-                  {processingRecording === key && (
-                    <p className="mb-2 rounded-xl bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700">
-                      מפענח הקלטה עם AI...
-                    </p>
-                  )}
-
-                  <SortableContext
-                    items={visibleItems.map((item) => toSortableId(key, item.id))}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <ul className="space-y-2 lg:max-h-[24rem] lg:overflow-y-auto lg:pl-1">
-                      {visibleItems.map((item) => {
-                        const creator = item.createdByUserId
-                          ? houseMembersMap.get(item.createdByUserId)
-                          : undefined;
-                        const avatarUrl =
-                          creator?.avatar_url ||
-                          (item.createdByUserId === activeUser?.id
-                            ? activeUser?.avatar_url
-                            : "");
-                        return (
-                        <SortableListItem
-                          key={item.id}
-                          sortableId={toSortableId(key, item.id)}
-                          item={item}
-                          sectionKey={key}
-                          createdByAvatarUrl={avatarUrl}
-                          addedAtLabel={formatAddedAt(item.createdAt)}
-                          onToggle={toggleComplete}
-                          onEdit={editItem}
-                          onDelete={deleteItem}
-                        />
-                        );
-                      })}
-                    </ul>
-                  </SortableContext>
-                  {visibleItems.length === 0 && (
-                    <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-xs font-bold text-slate-500">
-                      אין פריטים להצגה לפי הסינון הנוכחי.
-                    </p>
-                  )}
-                </article>
-              );
-            })}
+            {sectionOrder.map((key) => (
+              <SectionCard
+                key={key}
+                sectionKey={key}
+                section={sections[key]}
+                visibleItems={sectionStats[key].visibleItems}
+                progress={sectionStats[key].progress}
+                isRecordingHere={activeRecording === key}
+                processingRecording={processingRecording}
+                isSpeechSupported={isSpeechSupported}
+                houseMembersMap={houseMembersMap}
+                activeUserId={activeUser?.id}
+                activeUserAvatarUrl={activeUser?.avatar_url}
+                onAddItem={handleAddItem}
+                onToggle={toggleComplete}
+                onEdit={editItem}
+                onDelete={deleteItem}
+                onToggleRecording={toggleRecording}
+                onOpenRecipeModal={openRecipeModal}
+                externalInputRefSetter={(node) => { sectionInputRefs.current[key] = node; }}
+              />
+            ))}
           </section>
           <DragOverlay>
             {dragOverlayItem ? (
