@@ -863,6 +863,12 @@ export default function HomePage() {
   const [homeLink, setHomeLink] = useState("");
 
   const [activeRecording, setActiveRecording] = useState<SectionKey | null>(null);
+  const [ptrDist, setPtrDist] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const ptrStartYRef = useRef(0);
+  const ptrAtTopRef = useRef(false);
+  const mainScrollRef = useRef<HTMLElement>(null);
+  const PTR_THRESHOLD = 65;
   const [processingRecording, setProcessingRecording] = useState<SectionKey | null>(null);
   const [voiceError, setVoiceError] = useState("");
 
@@ -2521,7 +2527,47 @@ const saveUserProfileSettings = async () => {
     setIsRecipeModalOpen(false);
   };
 
+  const handlePtrStart = (e: React.TouchEvent) => {
+    const el = mainScrollRef.current;
+    ptrAtTopRef.current = !el || el.scrollTop <= 0;
+    ptrStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handlePtrMove = (e: React.TouchEvent) => {
+    if (!ptrAtTopRef.current || isRefreshing) return;
+    const dy = e.touches[0].clientY - ptrStartYRef.current;
+    if (dy <= 0) { setPtrDist(0); return; }
+    // Apply resistance so it doesn't stretch too far
+    setPtrDist(Math.min(dy * 0.45, 80));
+  };
+
+  const handlePtrEnd = async () => {
+    if (ptrDist >= PTR_THRESHOLD && !isRefreshing) {
+      setPtrDist(0);
+      setIsRefreshing(true);
+      const userId = activeUserRef.current?.id;
+      const houseId = activeHouseRef.current?.id;
+      // Clear lastAcceptedCloudUpdatedAtRef so fresh data is always applied
+      lastAcceptedCloudUpdatedAtRef.current = "";
+      if (userId) await loadUserHouses(userId, houseId, true);
+      setIsRefreshing(false);
+    } else {
+      setPtrDist(0);
+    }
+  };
+
   const applyActiveHouse = (house: CloudHouseRow) => {
+    // Discard stale data: if the incoming timestamp is older than (or equal to) what we
+    // already accepted, don't overwrite — protects against race between fallback polling
+    // returning old DB data after a save already completed.
+    if (
+      house.updated_at &&
+      lastAcceptedCloudUpdatedAtRef.current &&
+      house.updated_at <= lastAcceptedCloudUpdatedAtRef.current
+    ) {
+      return;
+    }
+
     const normalizedSections = normalizeCloudSections(house.sections);
     const normalizedHouse = { ...house, sections: normalizedSections };
     // Mark timestamp + increment version so the save effect knows this run
@@ -3708,7 +3754,26 @@ const saveUserProfileSettings = async () => {
   }
 
   return (
-    <main className="mx-auto min-h-[100dvh] w-full max-w-[1600px] px-2 py-4 pb-[calc(7.25rem+env(safe-area-inset-bottom))] sm:px-5 sm:py-6 sm:pb-8 lg:px-6">
+    <main
+      ref={mainScrollRef}
+      className="mx-auto min-h-[100dvh] w-full max-w-[1600px] px-2 py-4 pb-[calc(7.25rem+env(safe-area-inset-bottom))] sm:px-5 sm:py-6 sm:pb-8 lg:px-6"
+      onTouchStart={handlePtrStart}
+      onTouchMove={handlePtrMove}
+      onTouchEnd={() => { void handlePtrEnd(); }}
+    >
+      {/* Pull-to-refresh indicator */}
+      {(ptrDist > 0 || isRefreshing) && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center transition-all duration-200"
+          style={{ paddingTop: `${isRefreshing ? 18 : Math.max(0, ptrDist - 12)}px` }}
+        >
+          <div className={`flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200 ${isRefreshing ? "animate-spin" : ""}`} style={!isRefreshing ? { rotate: `${(ptrDist / PTR_THRESHOLD) * 360}deg` } : {}}>
+            <svg viewBox="0 0 24 24" className={`h-5 w-5 ${ptrDist >= PTR_THRESHOLD ? "text-teal-500" : "text-slate-400"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+          </div>
+        </div>
+      )}
       <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur sm:mb-7 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <HomeLogo houseName={activeHouse.name} houseImage={activeHouse.house_image} />
