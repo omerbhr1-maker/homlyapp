@@ -43,15 +43,44 @@ const authStorage = {
   },
 };
 
+// App data cache — uses localStorage as fast synchronous layer,
+// and writes Preferences asynchronously (fire-and-forget) so native
+// round-trips never block the JS thread.
 export const appCacheStorage = {
-  async getItem(key: string) {
-    return authStorage.getItem(key);
+  async getItem(key: string): Promise<string | null> {
+    if (typeof window === "undefined") return null;
+    // Fast path: localStorage is always written on setItem.
+    const local = window.localStorage.getItem(key);
+    if (local !== null) return local;
+    if (Capacitor.isNativePlatform()) {
+      if (nativeSessionCache.has(key)) return nativeSessionCache.get(key) ?? null;
+      const { value } = await Preferences.get({ key });
+      // Promote to localStorage for future fast reads.
+      if (value) {
+        try { window.localStorage.setItem(key, value); } catch { /* quota */ }
+        nativeSessionCache.set(key, value);
+      }
+      return value ?? null;
+    }
+    return null;
   },
-  async setItem(key: string, value: string) {
-    await authStorage.setItem(key, value);
+  setItem(key: string, value: string): void {
+    if (typeof window !== "undefined") {
+      try { window.localStorage.setItem(key, value); } catch { /* quota */ }
+    }
+    if (Capacitor.isNativePlatform()) {
+      nativeSessionCache.set(key, value);
+      void Preferences.set({ key, value });
+    }
   },
-  async removeItem(key: string) {
-    await authStorage.removeItem(key);
+  removeItem(key: string): void {
+    if (typeof window !== "undefined") {
+      try { window.localStorage.removeItem(key); } catch { /* ignore */ }
+    }
+    if (Capacitor.isNativePlatform()) {
+      nativeSessionCache.delete(key);
+      void Preferences.remove({ key });
+    }
   },
 };
 

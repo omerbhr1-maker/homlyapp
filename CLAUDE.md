@@ -24,16 +24,33 @@ home-management/
 │   ├── app/
 │   │   ├── api/ai/parse-recording/   # Voice → list items (OpenAI)
 │   │   ├── api/ai/recipe/            # Recipe → ingredients (OpenAI)
+│   │   ├── privacy/page.tsx          # Privacy policy page
 │   │   ├── layout.tsx                # Root layout (RTL, Hebrew)
 │   │   └── page.tsx                  # Main app page
-│   ├── components/                   # Reusable UI components
+│   ├── components/
+│   │   ├── RecipeModal.tsx           # Recipe import modal
+│   │   ├── InviteModal.tsx           # House invite modal
+│   │   ├── SettingsModal.tsx         # Settings modal
+│   │   ├── SortableListItem.tsx      # Drag-and-drop list item (dnd-kit)
+│   │   ├── ErrorBoundary.tsx         # React error boundary
+│   │   ├── SafeImage.tsx             # Image with fallback
+│   │   ├── HomeLogo.tsx              # App logo
+│   │   └── icons.tsx                 # SVG icon components
 │   ├── lib/
-│   │   ├── supabase.ts               # Supabase client
-│   │   └── capacitor.ts             # Haptics, share, keyboard, push notifications
+│   │   ├── supabase.ts               # Supabase client + appCacheStorage
+│   │   ├── capacitor.ts              # Haptics, share, keyboard, push notifications
+│   │   ├── item-parsing.ts           # Hebrew transcript → list items parsing
+│   │   ├── openai.ts                 # OpenAI client helper (server-side)
+│   │   ├── storage.ts                # Local storage utilities
+│   │   ├── constants.ts              # App-wide constants
+│   │   └── utils.ts                  # General utility functions
 │   └── types/                        # TypeScript definitions
 ├── supabase/
 │   ├── schema.sql                    # DB schema
-│   └── functions/send-push/          # Edge Function: send push notifications (Deno)
+│   └── functions/
+│       ├── send-push/                # Edge Function: send push notifications (Deno)
+│       ├── ai-recipe/                # Edge Function: recipe → ingredients (Deno)
+│       └── ai-parse-recording/       # Edge Function: voice → list items (Deno)
 └── ios/                              # Capacitor iOS project
 ```
 
@@ -59,8 +76,16 @@ npm run build
 # Sync web → app store version
 ./scripts/sync-web-to-appstore.sh
 
-# Build & open in Xcode
-npm run build:ios && npm run ios:sync && npm run ios:open
+# Build & sync to iOS (Capacitor CLI — run from home-management/)
+npm run build && npx cap sync ios && npx cap open ios
+
+# Testing (Playwright)
+npm test                        # run all tests
+npm run test:ui                 # interactive UI
+npm run test:auth               # auth flow tests
+npm run test:house              # house management tests
+npm run test:items              # list item tests
+npm run test:report             # show last test report
 ```
 
 ## Architecture Notes
@@ -73,11 +98,11 @@ npm run build:ios && npm run ios:sync && npm run ios:open
 
 ## Database Schema (Supabase)
 
-- `app_users` — username, display_name, avatar, auth_user_id
-- `houses` — name, sections (JSONB), owner_user_id, invite_phone, house_image
+- `app_users` — username, display_name, avatar_url, auth_user_id
+- `houses` — name, pin, sections (JSONB), owner_user_id, invite_phone, house_image, updated_at
 - `house_members` — (house_id, user_id, role) — membership table with RLS
-- `house_invites` — token-based invite links per house
-- `push_tokens` — APNs device tokens per user (iOS push notifications)
+- `house_invites` — token-based invite links per house, created_by_user_id
+- `push_tokens` — APNs device tokens per user, platform (default: 'ios')
 
 Storage bucket: `homly-images` — public read, auth-required write (avatars, house images)
 
