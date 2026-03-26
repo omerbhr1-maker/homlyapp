@@ -240,10 +240,10 @@ export default function HomePage() {
 
   // Returns true when an incoming cloud update should be discarded because we've
   // already accepted a newer (or equal) snapshot. Reads the ref live so it's always fresh.
-  const isStaleCloudUpdate = (updatedAt: string | undefined): boolean => {
+  const isStaleCloudUpdate = useCallback((updatedAt: string | undefined): boolean => {
     if (!updatedAt || !lastAcceptedCloudUpdatedAtRef.current) return false;
     return updatedAt <= lastAcceptedCloudUpdatedAtRef.current;
-  };
+  }, []);
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1806,7 +1806,7 @@ const saveUserProfileSettings = async () => {
   }, [recipeItems, addBatchItems]);
 
 
-  const applyActiveHouse = (house: CloudHouseRow) => {
+  const applyActiveHouse = useCallback((house: CloudHouseRow) => {
     // Discard stale data: if the incoming timestamp is older than (or equal to) what we
     // already accepted, don't overwrite — protects against race between fallback polling
     // returning old DB data after a save already completed.
@@ -1853,7 +1853,7 @@ const saveUserProfileSettings = async () => {
       },
     });
     setInvitePhone(house.invite_phone || "");
-  };
+  }, [isStaleCloudUpdate]);
 
   const loadHouseMembers = async (houseId: string) => {
     const client = supabase;

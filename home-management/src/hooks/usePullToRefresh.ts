@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const PTR_THRESHOLD = 65;
 
@@ -16,6 +16,9 @@ export function usePullToRefresh({
   const [isPtrDone, setIsPtrDone] = useState(false);
   const ptrStartYRef = useRef(0);
   const ptrAtTopRef = useRef(false);
+  const ptrDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (ptrDoneTimerRef.current) clearTimeout(ptrDoneTimerRef.current); }, []);
 
   const handlePtrStart = (e: React.TouchEvent) => {
     const el = mainScrollRef.current;
@@ -38,7 +41,8 @@ export function usePullToRefresh({
       await onRefresh();
       setIsRefreshing(false);
       setIsPtrDone(true);
-      setTimeout(() => setIsPtrDone(false), 900);
+      if (ptrDoneTimerRef.current) clearTimeout(ptrDoneTimerRef.current);
+      ptrDoneTimerRef.current = setTimeout(() => setIsPtrDone(false), 900);
     } else {
       setPtrDist(0);
     }
