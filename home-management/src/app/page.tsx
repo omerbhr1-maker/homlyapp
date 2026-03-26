@@ -156,6 +156,8 @@ export default function HomePage() {
   const [sections, setSections] = useState(initialSections);
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
+  const memberHousesRef = useRef<CloudHouseRow[]>([]);
+  memberHousesRef.current = memberHouses;
   const [invitePhone, setInvitePhone] = useState("");
   const [homeLink, setHomeLink] = useState("");
 
@@ -1100,10 +1102,10 @@ export default function HomePage() {
 
     setSections((prev) => {
       const user = activeUserRef.current;
-      const maxId =
-        prev[key].items.length > 0
-          ? Math.max(...prev[key].items.map((item) => item.id))
-          : 0;
+      let maxId = 0;
+      for (const item of prev[key].items) {
+        if (item.id > maxId) maxId = item.id;
+      }
 
       const newItems = cleanItems.map((text, index) => ({
         id: maxId + index + 1,
@@ -1548,7 +1550,8 @@ const saveUserProfileSettings = async () => {
     setIsUserProfileOpen(false);
   };
 
-  const saveHouseSettings = async () => {
+  const saveHouseSettings = useCallback(async () => {
+    const activeHouse = activeHouseRef.current;
     if (!activeHouse) return;
 
     const nextName = settingsHouseName.trim();
@@ -1609,14 +1612,15 @@ const saveUserProfileSettings = async () => {
     setSettingsHouseImage(finalHouseImage);
     setIsSavingSettings(false);
     setIsSettingsOpen(false);
-  };
+  }, [settingsHouseName, settingsHouseImage]);
 
-  const deleteActiveHouse = async () => {
+  const deleteActiveHouse = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
 
-    const isOwner = activeHouse.owner_user_id === activeUser.id;
-    if (!isOwner) {
+    if (activeHouse.owner_user_id !== activeUser.id) {
       setSettingsError("רק בעל הבית יכול למחוק את הבית.");
       return;
     }
@@ -1639,7 +1643,7 @@ const saveUserProfileSettings = async () => {
     setInviteToken("");
     await loadUserHouses(activeUser.id);
     setIsDeletingHouse(false);
-  };
+  }, []);
 
   const runRecipeFallback = useCallback(() => {
     const hasAnswer = (questionId: string) =>
@@ -1789,6 +1793,8 @@ const saveUserProfileSettings = async () => {
       setIsRecipeLoading(false);
     }
   }, [recipeText, recipeQuestions, recipeAnswers, runRecipeFallback]);
+
+  const handleRunRecipe = useCallback(() => { void runRecipeAi(); }, [runRecipeAi]);
 
   const addRecipeItemsToSupermarket = useCallback(() => {
     addBatchItems("supermarketShopping", recipeItems, "נוספו פריטי מתכון");
@@ -2420,8 +2426,10 @@ const saveUserProfileSettings = async () => {
     }
   }, []);
 
-  const leaveHouse = async () => {
+  const leaveHouse = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     if (activeHouse.owner_user_id === activeUser.id) return;
     const { error } = await client
@@ -2431,10 +2439,42 @@ const saveUserProfileSettings = async () => {
       .eq("user_id", activeUser.id);
     if (!error) {
       setIsSettingsOpen(false);
-      const otherHouse = memberHouses.find((h) => h.id !== activeHouse.id);
+      const otherHouse = memberHousesRef.current.find((h) => h.id !== activeHouse.id);
       await loadUserHouses(activeUser.id, otherHouse?.id);
     }
-  };
+  }, []);
+
+  const handleSaveHouseSettings = useCallback(() => { void saveHouseSettings(); }, [saveHouseSettings]);
+  const handleDeleteHouse = useCallback(() => { void deleteActiveHouse(); }, [deleteActiveHouse]);
+  const handleLeaveHouse = useCallback(() => { void leaveHouse(); }, [leaveHouse]);
+  const handleSettingsOpenUserProfile = useCallback(() => {
+    handleCloseSettings();
+    handleOpenUserProfile();
+  }, [handleCloseSettings, handleOpenUserProfile]);
+  const handleSwitchHouse = useCallback(() => {
+    setIsSettingsOpen(false);
+    const uid = activeUserRef.current?.id;
+    if (uid) window.localStorage.removeItem(getSelectedHouseStorageKey(uid));
+    setActiveHouse(null);
+    setInviteToken("");
+  }, []);
+  const handleSignOut = useCallback(async () => {
+    if (supabase) await supabase.auth.signOut();
+    setIsSettingsOpen(false);
+    window.localStorage.removeItem(CACHED_USER_KEY);
+    setActiveUser(null);
+    setActiveHouse(null);
+    setMemberHouses([]);
+    setInviteToken("");
+    setAuthError("");
+    const uid = activeUserRef.current?.id;
+    if (uid) window.localStorage.removeItem(getSelectedHouseStorageKey(uid));
+    setUsernameInput("");
+    setUserPasswordInput("");
+    setDisplayNameInput("");
+    setUserAvatarInput("");
+  }, []);
+  const handleCloseInviteModal = useCallback(() => setIsInviteModalOpen(false), []);
 
   const openInviteModal = useCallback(async () => {
     const client = supabase;
@@ -2480,20 +2520,31 @@ const saveUserProfileSettings = async () => {
     setInviteToken(createdToken);
   }, []);
 
+  const handleSettingsOpenInvite = useCallback(() => {
+    handleCloseSettings();
+    void openInviteModal();
+  }, [handleCloseSettings, openInviteModal]);
+
   const normalizedPhone = invitePhone.replace(/[^\d+]/g, "");
-  const inviteLink = (() => {
+  const inviteLink = useMemo(() => {
     if (!homeLink || !activeHouse) return homeLink;
     const url = new URL(homeLink);
     url.searchParams.set("house", activeHouse.id);
     if (inviteToken) url.searchParams.set("invite", inviteToken);
     return url.toString();
-  })();
-  const inviteMessage = inviteLink
-    ? `היי, מזמין אותך לבית שלי ב-Homly. זה לינק הצטרפות: ${inviteLink}`
-    : "היי, מזמין אותך לבית שלי ב-Homly.";
-  const smsHref = `sms:${normalizedPhone}?body=${encodeURIComponent(inviteMessage)}`;
+  }, [homeLink, activeHouse?.id, inviteToken]);
+  const inviteMessage = useMemo(
+    () => inviteLink
+      ? `היי, מזמין אותך לבית שלי ב-Homly. זה לינק הצטרפות: ${inviteLink}`
+      : "היי, מזמין אותך לבית שלי ב-Homly.",
+    [inviteLink],
+  );
+  const smsHref = useMemo(
+    () => `sms:${normalizedPhone}?body=${encodeURIComponent(inviteMessage)}`,
+    [normalizedPhone, inviteMessage],
+  );
 
-  const shareInviteLink = async () => {
+  const shareInviteLink = useCallback(async () => {
     if (!inviteLink) return;
     void hapticLight();
     try {
@@ -2502,9 +2553,9 @@ const saveUserProfileSettings = async () => {
     } catch {
       setInviteFeedback("לא הצלחתי לשתף כרגע.");
     }
-  };
+  }, [inviteLink, inviteMessage]);
 
-  const copyInviteLink = async () => {
+  const copyInviteLink = useCallback(async () => {
     if (!inviteLink) return;
     try {
       await navigator.clipboard.writeText(inviteLink);
@@ -2512,7 +2563,7 @@ const saveUserProfileSettings = async () => {
     } catch {
       setInviteFeedback("לא הצלחתי להעתיק את הלינק.");
     }
-  };
+  }, [inviteLink]);
 
   const resolveInviteUserByIdentifier = async (identifierRaw: string) => {
     const client = supabase;
@@ -2559,8 +2610,10 @@ const saveUserProfileSettings = async () => {
     return (byUsername?.[0] as CloudUserRow | undefined) || null;
   };
 
-  const inviteMemberByIdentifier = async () => {
+  const inviteMemberByIdentifier = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     const identifier = inviteIdentifierInput.trim();
     if (!identifier) {
@@ -2612,7 +2665,7 @@ const saveUserProfileSettings = async () => {
     setInviteIdentifierInput("");
     setInviteFeedback(`${targetUser.display_name} נוסף לבית בהצלחה.`);
     setInviteByUserLoading(false);
-  };
+  }, [inviteIdentifierInput]);
 
   if (!isSupabaseConfigured) {
     return (
@@ -2821,7 +2874,7 @@ const saveUserProfileSettings = async () => {
               isRecipeLoading={isRecipeLoading}
               recipeRecording={recipeRecording}
               onToggleRecording={toggleRecipeRecording}
-              onRunRecipe={() => void runRecipeAi()}
+              onRunRecipe={handleRunRecipe}
               onAddToSupermarket={addRecipeItemsToSupermarket}
               onClose={handleRecipeClose}
             /></Suspense>
@@ -2840,10 +2893,10 @@ const saveUserProfileSettings = async () => {
               smsHref={smsHref}
               inviteFeedback={inviteFeedback}
               houseId={activeHouse?.id}
-              onInviteMember={() => void inviteMemberByIdentifier()}
-              onShareLink={() => void shareInviteLink()}
-              onCopyLink={() => void copyInviteLink()}
-              onClose={() => setIsInviteModalOpen(false)}
+              onInviteMember={inviteMemberByIdentifier}
+              onShareLink={shareInviteLink}
+              onCopyLink={copyInviteLink}
+              onClose={handleCloseInviteModal}
             /></Suspense>
           )}
       </div>
@@ -2886,45 +2939,14 @@ const saveUserProfileSettings = async () => {
           isDeletingHouse={isDeletingHouse}
           settingsError={settingsError}
           isOwner={activeHouse?.owner_user_id === activeUser?.id}
-          onSave={() => void saveHouseSettings()}
-          onDelete={() => void deleteActiveHouse()}
+          onSave={handleSaveHouseSettings}
+          onDelete={handleDeleteHouse}
           onClose={handleCloseSettings}
-          onOpenUserProfile={() => {
-            handleCloseSettings();
-            handleOpenUserProfile();
-          }}
-          onOpenInvite={() => {
-            handleCloseSettings();
-            void openInviteModal();
-          }}
-          onSwitchHouse={() => {
-            setIsSettingsOpen(false);
-            if (activeUser?.id) {
-              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-            }
-            setActiveHouse(null);
-            setInviteToken("");
-          }}
-          onSignOut={async () => {
-            if (supabase) {
-              await supabase.auth.signOut();
-            }
-            setIsSettingsOpen(false);
-            window.localStorage.removeItem(CACHED_USER_KEY);
-            setActiveUser(null);
-            setActiveHouse(null);
-            setMemberHouses([]);
-            setInviteToken("");
-            setAuthError("");
-            if (activeUser?.id) {
-              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-            }
-            setUsernameInput("");
-            setUserPasswordInput("");
-            setDisplayNameInput("");
-            setUserAvatarInput("");
-          }}
-          onLeaveHouse={() => void leaveHouse()}
+          onOpenUserProfile={handleSettingsOpenUserProfile}
+          onOpenInvite={handleSettingsOpenInvite}
+          onSwitchHouse={handleSwitchHouse}
+          onSignOut={handleSignOut}
+          onLeaveHouse={handleLeaveHouse}
         /></Suspense>
       )}
     </main>

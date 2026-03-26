@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { SectionKey } from "@/types";
 
 type BottomNavProps = {
@@ -13,7 +14,7 @@ type BottomNavProps = {
   handleNavDragEnd: () => void;
 };
 
-export function BottomNav({
+export const BottomNav = memo(function BottomNav({
   isMobile,
   isNavHidden,
   navDragY,
@@ -93,4 +94,4 @@ export function BottomNav({
       </nav>
     </>
   );
-}
+});
