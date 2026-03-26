@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Analytics } from "@vercel/analytics/next";
 
 const ICON_VERSION = "20260308";
 
@@ -49,6 +50,7 @@ export default function RootLayout({
     <html lang="he" dir="rtl">
       <body className="antialiased">
         <ErrorBoundary>{children}</ErrorBoundary>
+        <Analytics />
       </body>
     </html>
   );

@@ -69,6 +69,7 @@ export const UserProfileModal = memo(function UserProfileModal({
               disabled={isProcessingImage}
               className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white dark:border-slate-600 bg-slate-900 dark:bg-slate-700 text-white shadow-lg disabled:opacity-50"
               title={isProcessingImage ? "מעבד תמונה..." : "החלפת תמונה"}
+              aria-label={isProcessingImage ? "מעבד תמונה..." : "החלפת תמונת פרופיל"}
             >
               <svg
                 viewBox="0 0 24 24"

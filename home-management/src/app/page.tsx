@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare, setupStatusBar, hideSplashScreen, addNetworkListener, addAppStateListener, addAppUrlOpenListener } from "@/lib/capacitor";
+import { initMonitoring } from "@/lib/monitoring";
 import {
   DndContext,
   DragEndEvent,
@@ -1009,10 +1010,11 @@ export default function HomePage() {
     return () => { cleanup?.(); };
   }, []);
 
-  // Capacitor Status Bar + Splash Screen — setup on mount
+  // Monitoring + Status Bar + Splash Screen — setup on mount
   useEffect(() => {
-    setupStatusBar();
-    hideSplashScreen();
+    initMonitoring();
+    void setupStatusBar();
+    void hideSplashScreen();
   }, []);
 
   // Capacitor Network — online/offline detection

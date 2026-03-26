@@ -72,6 +72,7 @@ export const RecipeModal = memo(function RecipeModal({
                 : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200"
             } transition`}
             title={recipeRecording ? "עצור הקלטה" : "הקלטת מתכון"}
+            aria-label={recipeRecording ? "עצור הקלטה" : "הקלטת מתכון"}
           >
             {recipeRecording ? <AudioWaveIcon /> : <MicIcon />}
           </button>

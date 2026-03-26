@@ -47,6 +47,7 @@ export const SortableListItem = memo(function SortableListItem({
         {...listeners}
         className="flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 active:cursor-grabbing"
         title="גרור לשינוי סדר"
+        aria-label="גרור לשינוי סדר"
       >
         <svg
           viewBox="0 0 24 24"

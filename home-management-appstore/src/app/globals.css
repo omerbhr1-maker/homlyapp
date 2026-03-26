@@ -56,7 +56,8 @@ body {
     radial-gradient(circle at 85% 0%, #d9f7ff 0%, transparent 33%),
     linear-gradient(180deg, #f5faff 0%, var(--background) 55%, #e8efff 100%);
   color: var(--foreground);
-  font-family: "Assistant", sans-serif;
+  /* SF Hebrew on iOS/macOS, fallback to Assistant on other platforms */
+  font-family: -apple-system, "SF Hebrew", system-ui, "Segoe UI", "Assistant", sans-serif;
   scroll-behavior: smooth;
 }
 

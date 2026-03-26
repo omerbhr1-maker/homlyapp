@@ -8,7 +8,11 @@ const config: Config = {
   ],
   darkMode: "media",
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        sans: ["-apple-system", "SF Hebrew", "system-ui", "Segoe UI", "Assistant", "sans-serif"],
+      },
+    },
   },
   plugins: [],
 };

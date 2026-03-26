@@ -135,11 +135,8 @@ export async function setupStatusBar() {
   if (!isNative) return;
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
-    await StatusBar.setOverlaysWebView({ overlay: true });
-    // Set style based on current color scheme
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    await StatusBar.setStyle({ style: prefersDark ? Style.Light : Style.Dark });
-    // Listen for color-scheme changes and update status bar accordingly
+    await StatusBar.setStyle({ style: prefersDark ? Style.Light : Style.Dark }).catch(() => {});
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", async (e) => {
       await StatusBar.setStyle({ style: e.matches ? Style.Light : Style.Dark }).catch(() => {});
     });

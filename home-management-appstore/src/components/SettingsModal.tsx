@@ -71,6 +71,7 @@ export const SettingsModal = memo(function SettingsModal({
               onClick={() => imageInputRef.current?.click()}
               className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white dark:border-slate-600 bg-slate-900 dark:bg-slate-700 text-white shadow-lg"
               title="החלפת תמונה"
+              aria-label="החלפת תמונת בית"
             >
               <svg
                 viewBox="0 0 24 24"

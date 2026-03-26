@@ -61,7 +61,7 @@ export function PullToRefreshIndicator({
         ) : (
           <svg
             viewBox="0 0 24 24"
-            className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400 dark:text-slate-500"}`}
+            className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400 dark:text-slate-500"} ${isRefreshing ? "animate-spin" : ""}`}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"

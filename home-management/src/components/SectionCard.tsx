@@ -102,6 +102,7 @@ export const SectionCard = memo(function SectionCard({
               onClick={onOpenRecipeModal}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-slate-700"
               title="מתכון חכם"
+              aria-label="מתכון חכם"
             >
               <RecipeIcon />
             </button>
@@ -109,6 +110,7 @@ export const SectionCard = memo(function SectionCard({
           <button
             type="button"
             onClick={handleToggleRecording}
+            aria-label={isRecordingHere ? "עצור הקלטה" : "הקלטה קולית"}
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition ${
               isRecordingHere
                 ? "border-rose-300 bg-rose-500 text-white shadow-lg shadow-rose-200"
