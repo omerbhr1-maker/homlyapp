@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "BD8832SKHP.com.omerb.homly",
+        "paths": [
+          "/?invite=*",
+          "/?house=*",
+          "/invite/*"
+        ]
+      }
+    ]
+  }
+}

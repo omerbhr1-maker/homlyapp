@@ -25,13 +25,13 @@ export function LoadingBar({ done }: { done?: boolean }) {
 
   return (
     <div className="mt-5">
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
         <div
           className="h-full rounded-full bg-gradient-to-l from-teal-500 to-cyan-500 transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <p className="mt-2 text-xs font-bold text-teal-600">{pct}%</p>
+      <p className="mt-2 text-xs font-bold text-teal-600 dark:text-teal-400">{pct}%</p>
     </div>
   );
 }

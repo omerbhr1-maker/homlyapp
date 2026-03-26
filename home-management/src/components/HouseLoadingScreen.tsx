@@ -13,17 +13,17 @@ type HouseLoadingScreenProps = {
 export function HouseLoadingScreen({ cachedHouseMeta, houseMembers }: HouseLoadingScreenProps) {
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-      <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+      <section className="w-full rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 p-6 text-center shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50">
         <HomeLogo houseName={cachedHouseMeta?.name} houseImage={cachedHouseMeta?.house_image} />
-        <p className="mt-4 text-sm font-bold text-slate-700">טוען את הבית שלך...</p>
-        <p className="mt-2 text-xs text-slate-500">מסנכרן נתונים עדכניים מהענן.</p>
+        <p className="mt-4 text-sm font-bold text-slate-700 dark:text-slate-200">טוען את הבית שלך...</p>
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">מסנכרן נתונים עדכניים מהענן.</p>
         <LoadingBar />
         {houseMembers.length > 0 && (
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {houseMembers.slice(0, 4).map((member) => (
               <div
                 key={member.id}
-                className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
+                className="flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-3 py-2"
               >
                 <SafeImage
                   src={member.avatar_url}
@@ -32,12 +32,12 @@ export function HouseLoadingScreen({ cachedHouseMeta, houseMembers }: HouseLoadi
                   height={28}
                   className="h-7 w-7 rounded-xl object-cover"
                   fallback={
-                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 dark:bg-teal-900/60 text-xs font-bold text-teal-700 dark:text-teal-400">
                       {member.display_name.slice(0, 1)}
                     </span>
                   }
                 />
-                <span className="text-xs font-bold text-slate-700">{member.display_name}</span>
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{member.display_name}</span>
               </div>
             ))}
           </div>

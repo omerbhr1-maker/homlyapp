@@ -92,28 +92,28 @@ export function AuthScreen({
 }: AuthScreenProps) {
   return (
     <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-      <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-5 shadow-xl shadow-slate-200/70 sm:p-7">
+      <section className="w-full rounded-3xl border border-white/80 bg-white/95 dark:bg-slate-800/95 dark:border-slate-700/80 p-5 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 sm:p-7">
         <HomeLogo />
-        <p className="mt-3 text-sm text-slate-600">התחברות היא לפי משתמש אישי. אחרי זה נכנסים לבית.</p>
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">התחברות היא לפי משתמש אישי. אחרי זה נכנסים לבית.</p>
 
         {isRecoveryMode && (
-          <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 p-3">
-            <p className="text-xs font-bold text-teal-700">איפוס סיסמה</p>
-            <p className="mt-1 text-xs text-teal-700">הכנס סיסמה חדשה כדי להשלים את תהליך האיפוס.</p>
+          <div className="mt-4 rounded-2xl border border-teal-200 dark:border-teal-700 bg-teal-50 dark:bg-teal-900/40 p-3">
+            <p className="text-xs font-bold text-teal-700 dark:text-teal-400">איפוס סיסמה</p>
+            <p className="mt-1 text-xs text-teal-700 dark:text-teal-400">הכנס סיסמה חדשה כדי להשלים את תהליך האיפוס.</p>
             <div className="mt-2 space-y-2">
               <input
                 value={recoveryPasswordInput}
                 onChange={(event) => setRecoveryPasswordInput(event.target.value)}
                 type="password"
                 placeholder="סיסמה חדשה"
-                className="min-h-11 w-full rounded-2xl border border-teal-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="min-h-11 w-full rounded-2xl border border-teal-200 dark:border-teal-700 bg-white dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
               />
               <input
                 value={recoveryPasswordConfirmInput}
                 onChange={(event) => setRecoveryPasswordConfirmInput(event.target.value)}
                 type="password"
                 placeholder="אימות סיסמה חדשה"
-                className="min-h-11 w-full rounded-2xl border border-teal-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="min-h-11 w-full rounded-2xl border border-teal-200 dark:border-teal-700 bg-white dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
               />
               <button
                 type="button"
@@ -128,12 +128,12 @@ export function AuthScreen({
               <p className="mt-2 text-xs font-bold text-rose-600">{recoveryPasswordError}</p>
             )}
             {recoveryPasswordFeedback && (
-              <p className="mt-2 text-xs font-bold text-teal-700">{recoveryPasswordFeedback}</p>
+              <p className="mt-2 text-xs font-bold text-teal-700 dark:text-teal-400">{recoveryPasswordFeedback}</p>
             )}
           </div>
         )}
 
-        <div className="mt-4 flex gap-2 rounded-2xl bg-slate-100 p-1">
+        <div className="mt-4 flex gap-2 rounded-2xl bg-slate-100 dark:bg-slate-700 p-1">
           <button
             type="button"
             onClick={() => {
@@ -142,7 +142,7 @@ export function AuthScreen({
               setIsForgotPasswordOpen(false);
             }}
             className={`flex-1 rounded-xl py-2 text-sm font-bold ${
-              authMode === "login" ? "bg-white text-teal-700" : "text-slate-500"
+              authMode === "login" ? "bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-400" : "text-slate-500 dark:text-slate-400"
             }`}
           >
             התחברות משתמש
@@ -155,7 +155,7 @@ export function AuthScreen({
               setIsForgotPasswordOpen(false);
             }}
             className={`flex-1 rounded-xl py-2 text-sm font-bold ${
-              authMode === "create" ? "bg-white text-teal-700" : "text-slate-500"
+              authMode === "create" ? "bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-400" : "text-slate-500 dark:text-slate-400"
             }`}
           >
             יצירת משתמש
@@ -169,7 +169,7 @@ export function AuthScreen({
                 value={displayNameInput}
                 onChange={(event) => setDisplayNameInput(event.target.value)}
                 placeholder="שם מלא להצגה"
-                className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
               />
               <input
                 value={emailInput}
@@ -177,10 +177,10 @@ export function AuthScreen({
                 type="email"
                 dir="ltr"
                 placeholder="אימייל (לכניסה ולאיפוס סיסמה)"
-                className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
               />
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <p className="mb-2 text-xs font-bold text-slate-600">תמונת פרופיל (אופציונלי)</p>
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 p-3">
+                <p className="mb-2 text-xs font-bold text-slate-600 dark:text-slate-300">תמונת פרופיל (אופציונלי)</p>
                 <div className="flex items-center gap-3">
                   {userAvatarInput ? (
                     <Image
@@ -190,10 +190,10 @@ export function AuthScreen({
                       alt="תמונת פרופיל"
                       width={44}
                       height={44}
-                      className="h-11 w-11 rounded-2xl border border-slate-200 object-cover"
+                      className="h-11 w-11 rounded-2xl border border-slate-200 dark:border-slate-600 object-cover"
                     />
                   ) : (
-                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-100 text-sm font-bold text-teal-700">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-100 dark:bg-teal-900/60 text-sm font-bold text-teal-700 dark:text-teal-400">
                       {displayNameInput.trim().slice(0, 1) || "?"}
                     </span>
                   )}
@@ -201,7 +201,7 @@ export function AuthScreen({
                     type="button"
                     onClick={openUserAvatarPicker}
                     disabled={isProcessingImage}
-                    className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                    className="min-h-10 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 text-xs font-bold text-slate-700 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
                   >
                     {isProcessingImage ? "מעבד תמונה..." : "העלאת תמונה"}
                   </button>
@@ -209,7 +209,7 @@ export function AuthScreen({
                     <button
                       type="button"
                       onClick={() => setUserAvatarInput("")}
-                      className="min-h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 transition hover:bg-slate-100"
+                      className="min-h-10 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 text-xs font-bold text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-700"
                     >
                       הסרה
                     </button>
@@ -230,14 +230,14 @@ export function AuthScreen({
             onChange={(event) => setUsernameInput(event.target.value)}
             dir={authMode === "login" ? "rtl" : undefined}
             placeholder={authMode === "create" ? "שם משתמש" : "מייל/שם משתמש"}
-            className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-right text-sm outline-none placeholder:text-right focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-right text-sm outline-none placeholder:text-right focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
           />
           <input
             value={userPasswordInput}
             onChange={(event) => setUserPasswordInput(event.target.value)}
             type="password"
             placeholder="סיסמה"
-            className="min-h-11 w-full rounded-2xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
           />
           <button
             type="button"
@@ -260,7 +260,7 @@ export function AuthScreen({
                 setForgotPasswordFeedback("");
                 setIsForgotPasswordOpen(true);
               }}
-              className="w-full text-center text-xs font-bold text-slate-500 underline-offset-2 transition hover:text-slate-700 hover:underline"
+              className="w-full text-center text-xs font-bold text-slate-500 dark:text-slate-400 underline-offset-2 transition hover:text-slate-700 dark:hover:text-slate-200 hover:underline"
             >
               שכחתי סיסמה
             </button>
@@ -269,21 +269,21 @@ export function AuthScreen({
 
         {authError && <p className="mt-3 text-xs font-bold text-rose-600">{authError}</p>}
         {recoveryPasswordFeedback && (
-          <p className="mt-3 text-xs font-bold text-teal-700">{recoveryPasswordFeedback}</p>
+          <p className="mt-3 text-xs font-bold text-teal-700 dark:text-teal-400">{recoveryPasswordFeedback}</p>
         )}
         {isForgotPasswordOpen && (
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 p-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-bold text-slate-700">שחזור סיסמה</p>
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">שחזור סיסמה</p>
               <button
                 type="button"
                 onClick={() => setIsForgotPasswordOpen(false)}
-                className="rounded-xl bg-white px-2 py-1 text-[11px] font-bold text-slate-600"
+                className="rounded-xl bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-bold text-slate-600 dark:text-slate-300"
               >
                 סגור
               </button>
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               הזן אימייל הרשמה. נשלח קישור לאיפוס סיסמה.
             </p>
             <input
@@ -292,13 +292,13 @@ export function AuthScreen({
               type="email"
               dir="ltr"
               placeholder="אימייל"
-              className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+              className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
             />
             <button
               type="button"
               onClick={handleForgotPassword}
               disabled={isForgotPasswordLoading}
-              className="mt-2 min-h-11 w-full rounded-2xl bg-slate-900 text-sm font-bold text-white disabled:opacity-50"
+              className="mt-2 min-h-11 w-full rounded-2xl bg-slate-900 dark:bg-slate-700 text-sm font-bold text-white disabled:opacity-50"
             >
               {isForgotPasswordLoading ? "שולח..." : "שלח קישור איפוס"}
             </button>
@@ -306,7 +306,7 @@ export function AuthScreen({
               <p className="mt-2 text-xs font-bold text-rose-600">{forgotPasswordError}</p>
             )}
             {forgotPasswordFeedback && (
-              <p className="mt-2 text-xs font-bold text-teal-700">{forgotPasswordFeedback}</p>
+              <p className="mt-2 text-xs font-bold text-teal-700 dark:text-teal-400">{forgotPasswordFeedback}</p>
             )}
           </div>
         )}

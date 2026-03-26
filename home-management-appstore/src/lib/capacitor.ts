@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 
 const isNative = Capacitor.isNativePlatform();
+export { isNative };
 
 // ─── Haptic Feedback ──────────────────────────────────────────────────────────
 
@@ -126,4 +127,104 @@ export async function setupPushListeners(
     }
   );
   return () => listener.remove();
+}
+
+// ─── Status Bar ────────────────────────────────────────────────────────────────
+
+export async function setupStatusBar() {
+  if (!isNative) return;
+  try {
+    const { StatusBar, Style } = await import("@capacitor/status-bar");
+    await StatusBar.setOverlaysWebView({ overlay: true });
+    // Set style based on current color scheme
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    await StatusBar.setStyle({ style: prefersDark ? Style.Light : Style.Dark });
+    // Listen for color-scheme changes and update status bar accordingly
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", async (e) => {
+      await StatusBar.setStyle({ style: e.matches ? Style.Light : Style.Dark }).catch(() => {});
+    });
+  } catch {}
+}
+
+// ─── Splash Screen ─────────────────────────────────────────────────────────────
+
+export async function hideSplashScreen() {
+  if (!isNative) return;
+  try {
+    const { SplashScreen } = await import("@capacitor/splash-screen");
+    await SplashScreen.hide({ fadeOutDuration: 300 });
+  } catch {}
+}
+
+// ─── Network ───────────────────────────────────────────────────────────────────
+
+export async function getNetworkStatus(): Promise<boolean> {
+  if (!isNative) return navigator.onLine;
+  try {
+    const { Network } = await import("@capacitor/network");
+    const status = await Network.getStatus();
+    return status.connected;
+  } catch {
+    return navigator.onLine;
+  }
+}
+
+export async function addNetworkListener(
+  onChange: (connected: boolean) => void
+): Promise<() => void> {
+  if (!isNative) {
+    const onOnline = () => onChange(true);
+    const onOffline = () => onChange(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }
+  try {
+    const { Network } = await import("@capacitor/network");
+    const listener = await Network.addListener("networkStatusChange", (status) => {
+      onChange(status.connected);
+    });
+    return () => listener.remove();
+  } catch {
+    return () => {};
+  }
+}
+
+// ─── App Lifecycle ─────────────────────────────────────────────────────────────
+
+export async function addAppStateListener(
+  onResume: () => void,
+  onPause?: () => void
+): Promise<() => void> {
+  if (!isNative) return () => {};
+  try {
+    const { App } = await import("@capacitor/app");
+    const listener = await App.addListener("appStateChange", (state) => {
+      if (state.isActive) onResume();
+      else onPause?.();
+    });
+    return () => listener.remove();
+  } catch {
+    return () => {};
+  }
+}
+
+// ─── Universal Links (appUrlOpen) ─────────────────────────────────────────────
+
+export async function addAppUrlOpenListener(
+  onUrl: (url: string) => void
+): Promise<() => void> {
+  if (!isNative) return () => {};
+  try {
+    const { App } = await import("@capacitor/app");
+    const listener = await App.addListener("appUrlOpen", (event) => {
+      onUrl(event.url);
+    });
+    return () => listener.remove();
+  } catch {
+    return () => {};
+  }
 }

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { SafeImage } from "@/components/SafeImage";
 
 type SettingsModalProps = {
@@ -20,7 +20,7 @@ type SettingsModalProps = {
   onLeaveHouse: () => void;
 };
 
-export function SettingsModal({
+export const SettingsModal = memo(function SettingsModal({
   settingsHouseName,
   onSettingsHouseNameChange,
   settingsHouseImage,
@@ -41,22 +41,22 @@ export function SettingsModal({
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-3 sm:items-center">
-      <div className="w-full max-w-md rounded-3xl border border-white/70 bg-white p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 dark:bg-black/70 p-3 sm:items-center">
+      <div className="w-full max-w-md rounded-3xl border border-white/70 dark:border-slate-700/70 bg-white dark:bg-slate-800 p-5 shadow-2xl dark:shadow-slate-900/50">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-900">הגדרות בית</h3>
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">הגדרות בית</h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
+            className="rounded-xl bg-slate-100 dark:bg-slate-700 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200"
           >
             סגור
           </button>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 p-4">
           <div className="relative mx-auto mb-3 h-24 w-24">
-            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200">
+            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg shadow-slate-200 dark:shadow-slate-900/50">
               <SafeImage
                 src={settingsHouseImage}
                 alt="תמונת בית"
@@ -69,7 +69,7 @@ export function SettingsModal({
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-900 text-white shadow-lg"
+              className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full border border-white dark:border-slate-600 bg-slate-900 dark:bg-slate-700 text-white shadow-lg"
               title="החלפת תמונה"
             >
               <svg
@@ -96,23 +96,23 @@ export function SettingsModal({
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-600">
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-300">
               שם הבית
               <input
                 value={settingsHouseName}
                 onChange={(event) => onSettingsHouseNameChange(event.target.value)}
-                className="mt-1 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="mt-1 min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-600"
                 placeholder="הכנס שם לבית"
               />
             </label>
-            <p className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-500">
+            <p className="rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-center text-xs font-bold text-slate-500 dark:text-slate-400">
               שינוי תמונה דרך אייקון העריכה ליד התמונה
             </p>
           </div>
         </div>
 
         {settingsError && (
-          <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+          <p className="mt-3 rounded-xl bg-rose-50 dark:bg-red-900/30 px-3 py-2 text-xs font-bold text-rose-700">
             {settingsError}
           </p>
         )}
@@ -121,7 +121,7 @@ export function SettingsModal({
           type="button"
           onClick={onSave}
           disabled={isSavingSettings}
-          className="mt-4 min-h-11 w-full rounded-2xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50"
+          className="mt-4 min-h-11 w-full rounded-2xl bg-slate-900 dark:bg-slate-700 px-4 text-sm font-bold text-white transition hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50"
         >
           {isSavingSettings ? "שומר..." : "שמור הגדרות"}
         </button>
@@ -129,7 +129,7 @@ export function SettingsModal({
         <button
           type="button"
           onClick={onOpenUserProfile}
-          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 text-sm font-bold text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
         >
           פרופיל משתמש
         </button>
@@ -137,7 +137,7 @@ export function SettingsModal({
         <button
           type="button"
           onClick={onOpenInvite}
-          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 text-sm font-bold text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
         >
           שיתוף והזמנה לבית
         </button>
@@ -145,7 +145,7 @@ export function SettingsModal({
         <button
           type="button"
           onClick={onSwitchHouse}
-          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+          className="mt-3 min-h-11 w-full rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 text-sm font-bold text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
         >
           בחירת בית אחר
         </button>
@@ -165,7 +165,7 @@ export function SettingsModal({
           <button
             type="button"
             onClick={onLeaveHouse}
-            className="mt-3 min-h-11 w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+            className="mt-3 min-h-11 w-full rounded-2xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-red-900/30 px-4 text-sm font-bold text-rose-700 dark:text-rose-400 transition hover:bg-rose-100 dark:hover:bg-red-900/50"
           >
             עזוב בית
           </button>
@@ -181,4 +181,4 @@ export function SettingsModal({
       </div>
     </div>
   );
-}
+});

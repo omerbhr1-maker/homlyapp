@@ -19,14 +19,14 @@ export const HouseHeader = memo(function HouseHeader({
   onOpenSettings,
 }: HouseHeaderProps) {
   return (
-    <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur sm:mb-7 sm:p-6">
+    <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 dark:border-slate-700/70 bg-white/90 dark:bg-slate-800/90 p-4 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur sm:mb-7 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <HomeLogo houseName={activeHouse.name} houseImage={activeHouse.house_image} />
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onOpenUserProfile}
-            className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-1 lg:flex"
+            className="hidden items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 lg:flex"
           >
             <SafeImage
               src={activeUser.avatar_url}
@@ -35,17 +35,17 @@ export const HouseHeader = memo(function HouseHeader({
               height={28}
               className="h-7 w-7 rounded-xl object-cover"
               fallback={
-                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 text-xs font-bold text-teal-700">
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-100 dark:bg-teal-900/60 text-xs font-bold text-teal-700 dark:text-teal-400">
                   {activeUser.display_name.slice(0, 1)}
                 </span>
               }
             />
-            <span className="text-xs font-bold text-slate-700">{activeUser.display_name}</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{activeUser.display_name}</span>
           </button>
           <button
             type="button"
             onClick={onOpenSettings}
-            className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white"
+            className="flex items-center gap-1 rounded-xl bg-slate-900 dark:bg-slate-700 px-3 py-2 text-xs font-bold text-white"
           >
             <svg
               viewBox="0 0 24 24"

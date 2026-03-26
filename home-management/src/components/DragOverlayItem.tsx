@@ -5,8 +5,8 @@ import type { Item } from "@/types";
 
 export const DragOverlayItem = memo(function DragOverlayItem({ item }: { item: Item }) {
   return (
-    <div className="flex w-[min(92vw,30rem)] items-center gap-2 rounded-2xl border border-teal-300 bg-white px-3 py-2 shadow-2xl shadow-slate-300">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
+    <div className="flex w-[min(92vw,30rem)] items-center gap-2 rounded-2xl border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 px-3 py-2 shadow-2xl shadow-slate-300 dark:shadow-slate-900/50">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400">
         <svg
           viewBox="0 0 24 24"
           className="h-4 w-4"
@@ -26,7 +26,7 @@ export const DragOverlayItem = memo(function DragOverlayItem({ item }: { item: I
         </svg>
       </span>
       <span
-        className={`truncate text-sm font-bold ${item.completed ? "text-slate-400 line-through" : "text-slate-800"}`}
+        className={`truncate text-sm font-bold ${item.completed ? "text-slate-400 dark:text-slate-500 line-through" : "text-slate-800 dark:text-slate-100"}`}
       >
         {item.text}
       </span>

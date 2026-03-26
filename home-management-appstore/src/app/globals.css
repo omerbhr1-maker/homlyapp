@@ -20,6 +20,18 @@
   --border: #e5e7eb;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f172a;
+    --foreground: #f1f5f9;
+    --card: #1e293b;
+    --muted: #94a3b8;
+    --primary: #14b8a6;
+    --primary-soft: #134e4a;
+    --border: #334155;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -46,6 +58,15 @@ body {
   color: var(--foreground);
   font-family: "Assistant", sans-serif;
   scroll-behavior: smooth;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(circle at 15% 10%, #1e293b 0%, transparent 35%),
+      radial-gradient(circle at 85% 0%, #0f2a3d 0%, transparent 33%),
+      linear-gradient(180deg, #0f1a2e 0%, var(--background) 55%, #0a1628 100%);
+  }
 }
 
 input::placeholder,
@@ -113,6 +134,23 @@ body.keyboard-open nav.bottom-nav {
   transform: translateY(150%);
   opacity: 0;
   pointer-events: none;
+}
+
+/* offline banner — מוצג כשאין חיבור לרשת */
+body.offline::before {
+  content: "אין חיבור לרשת";
+  position: fixed;
+  top: var(--sat, 0px);
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #ef4444;
+  color: #ffffff;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  direction: rtl;
 }
 
 /* swipe-to-delete — CSS בסיסי */

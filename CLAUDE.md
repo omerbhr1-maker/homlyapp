@@ -73,19 +73,33 @@ cd home-management && npm run dev
 # Build for web
 npm run build
 
-# Sync web → app store version
-./scripts/sync-web-to-appstore.sh
+# Type check
+npm run typecheck
 
-# Build & sync to iOS (Capacitor CLI — run from home-management/)
-npm run build && npx cap sync ios && npx cap open ios
+# Sync web → app store version (code only)
+npm run sync
 
-# Testing (Playwright)
+# Sync + npm install in appstore project
+npm run sync:install
+
+# Build for iOS (build + sync appstore + cap sync)
+npm run ios:build
+
+# Full iOS deploy (build + sync + open Xcode)
+npm run ios:deploy
+
+# Testing (Playwright) — run from home-management/
 npm test                        # run all tests
 npm run test:ui                 # interactive UI
 npm run test:auth               # auth flow tests
 npm run test:house              # house management tests
 npm run test:items              # list item tests
-npm run test:report             # show last test report
+npm run test:sections           # items-sections (supermarket/tasks/general)
+npm run test:settings           # settings modal tests
+npm run test:profile            # user profile modal tests
+npm run test:invite             # invite modal tests
+npm run test:search             # search + bottom nav tests
+npm run test:report             # show last HTML test report
 ```
 
 ## Architecture Notes
@@ -95,6 +109,40 @@ npm run test:report             # show last test report
 - **Local mode**: App works without Supabase configured (local-only).
 - **Real-time sync**: Supabase Realtime for multi-user house syncing.
 - **AI routes are server-side only** — never import OpenAI on the client.
+- **iOS workflow**: after any code change, run `npm run ios:deploy` to build + sync + open Xcode. Always sync appstore before opening Xcode.
+- **After adding a Capacitor plugin**: add it to `home-management-appstore/ios/App/App/capacitor.config.json` → `packageClassList` and re-run `npx cap sync ios`.
+
+## iOS / App Store Details
+
+- **Bundle ID**: `com.omerb.homly`
+- **Apple Team ID**: `BD8832SKHP`
+- **App Name**: Homly
+- **Minimum iOS**: 15.0
+- **Production URL**: `https://home-management-hebrew.pages.dev`
+- **Entitlements**: `home-management-appstore/ios/App/App/App.entitlements` — change `aps-environment` to `production` before App Store submission
+
+## Capacitor Plugins (home-management)
+
+| Plugin | Purpose |
+|--------|---------|
+| `@capacitor/haptics` | Light/Medium/Heavy/Success/Error feedback |
+| `@capacitor/keyboard` | Keyboard height tracking, hide bottom nav |
+| `@capacitor/preferences` | Persistent key-value storage (Capacitor Preferences) |
+| `@capacitor/push-notifications` | APNs push token registration |
+| `@capacitor/share` | Native share sheet |
+| `@capacitor/status-bar` | Dynamic status bar style (light/dark) |
+| `@capacitor/splash-screen` | Hide splash after load with fade |
+| `@capacitor/network` | Online/offline detection + banner |
+| `@capacitor/app` | App resume sync + Universal Links handler |
+
+All Capacitor functions are in `src/lib/capacitor.ts` — lazy-loaded, native-only.
+
+## Testing
+
+- **Test credentials** (Supabase test user): `test@homly.app` / `Test1234!`
+- Credentials stored in `tests/.env.test` (gitignored), loaded automatically by `playwright.config.ts`
+- Tests that require Supabase use `test.skip()` gracefully when no connection — they show as `skipped`, not `failed`
+- 107 tests total; ~31 pass without credentials (UI/structure), rest require live Supabase
 
 ## Database Schema (Supabase)
 

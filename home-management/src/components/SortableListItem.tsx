@@ -37,7 +37,7 @@ export const SortableListItem = memo(function SortableListItem({
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white px-3 py-2 ${
+      className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200/90 dark:border-slate-600/90 bg-white dark:bg-slate-800 px-3 py-2 ${
         isDragging ? "z-20 opacity-40 shadow-lg" : ""
       }`}
     >
@@ -45,7 +45,7 @@ export const SortableListItem = memo(function SortableListItem({
         type="button"
         {...attributes}
         {...listeners}
-        className="flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl border border-slate-200 text-slate-500 active:cursor-grabbing"
+        className="flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 active:cursor-grabbing"
         title="גרור לשינוי סדר"
       >
         <svg
@@ -73,18 +73,18 @@ export const SortableListItem = memo(function SortableListItem({
       >
         <span
           className={`h-5 w-5 shrink-0 rounded-full border ${
-            item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"
+            item.completed ? "border-teal-600 bg-teal-600" : "border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-800"
           }`}
         />
         <span className="min-w-0 flex-1">
           <span
             className={`block truncate text-sm ${
-              item.completed ? "text-slate-400 line-through" : "text-slate-700"
+              item.completed ? "text-slate-400 dark:text-slate-500 line-through" : "text-slate-700 dark:text-slate-200"
             }`}
           >
             {item.text}
           </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500">
             {createdByAvatarUrl ? (
               <Image
                 loader={passthroughImageLoader}
@@ -96,7 +96,7 @@ export const SortableListItem = memo(function SortableListItem({
                 className="h-3.5 w-3.5 rounded-full object-cover"
               />
             ) : (
-              <span className="h-3.5 w-3.5 rounded-full bg-slate-300" />
+              <span className="h-3.5 w-3.5 rounded-full bg-slate-300 dark:bg-slate-600" />
             )}
             <span>{addedAtLabel}</span>
           </span>
@@ -107,7 +107,7 @@ export const SortableListItem = memo(function SortableListItem({
         onClick={handleEdit}
         aria-label="עריכה"
         title="עריכה"
-        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 transition hover:bg-slate-100"
+        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-700"
       >
         <svg
           viewBox="0 0 24 24"
@@ -128,7 +128,7 @@ export const SortableListItem = memo(function SortableListItem({
         onClick={handleDelete}
         aria-label="מחיקה"
         title="מחיקה"
-        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50"
+        className="flex min-h-9 items-center justify-center rounded-xl px-2 py-1 text-rose-600 transition hover:bg-rose-50 dark:hover:bg-red-900/30"
       >
         <svg
           viewBox="0 0 24 24"

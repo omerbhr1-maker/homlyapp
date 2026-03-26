@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
+import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare, setupStatusBar, hideSplashScreen, addNetworkListener, addAppStateListener, addAppUrlOpenListener } from "@/lib/capacitor";
 import {
   DndContext,
   DragEndEvent,
@@ -156,6 +156,8 @@ export default function HomePage() {
   const [sections, setSections] = useState(initialSections);
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
+  const memberHousesRef = useRef<CloudHouseRow[]>([]);
+  memberHousesRef.current = memberHouses;
   const [invitePhone, setInvitePhone] = useState("");
   const [homeLink, setHomeLink] = useState("");
 
@@ -198,6 +200,20 @@ export default function HomePage() {
     generalShopping: null,
     supermarketShopping: null,
   });
+  // Stable setters so SectionCard's memo is not defeated by inline lambdas.
+  // sectionOrder is a constant and sectionInputRefs is a ref — both stable forever.
+  const sectionInputRefSetters = useMemo(
+    () =>
+      Object.fromEntries(
+        sectionOrder.map((key) => [
+          key,
+          (node: SectionInputHandle | null) => {
+            sectionInputRefs.current[key] = node;
+          },
+        ]),
+      ) as Record<SectionKey, (node: SectionInputHandle | null) => void>,
+    [],
+  );
   const autoJoinFromLinkDoneRef = useRef(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeAuthUserIdRef = useRef<string | null>(null);
@@ -224,10 +240,10 @@ export default function HomePage() {
 
   // Returns true when an incoming cloud update should be discarded because we've
   // already accepted a newer (or equal) snapshot. Reads the ref live so it's always fresh.
-  const isStaleCloudUpdate = (updatedAt: string | undefined): boolean => {
+  const isStaleCloudUpdate = useCallback((updatedAt: string | undefined): boolean => {
     if (!updatedAt || !lastAcceptedCloudUpdatedAtRef.current) return false;
     return updatedAt <= lastAcceptedCloudUpdatedAtRef.current;
-  };
+  }, []);
   const [isHouseLoading, setIsHouseLoading] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -993,6 +1009,54 @@ export default function HomePage() {
     return () => { cleanup?.(); };
   }, []);
 
+  // Capacitor Status Bar + Splash Screen — setup on mount
+  useEffect(() => {
+    setupStatusBar();
+    hideSplashScreen();
+  }, []);
+
+  // Capacitor Network — online/offline detection
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addNetworkListener((connected) => {
+      if (!connected) {
+        document.body.classList.add("offline");
+      } else {
+        document.body.classList.remove("offline");
+      }
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // Capacitor App — refresh data on app resume (native equivalent of visibilitychange)
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addAppStateListener(() => {
+      const userId = activeUserRef.current?.id;
+      const houseId = activeHouseRef.current?.id;
+      if (userId) void loadUserHouses(userId, houseId);
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Capacitor Universal Links — handle invite URLs when app is already open
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addAppUrlOpenListener((url) => {
+      try {
+        const parsed = new URL(url);
+        const invite = parsed.searchParams.get("invite") ?? parsed.searchParams.get("house");
+        if (invite) {
+          setJoinTokenInput(invite.toUpperCase());
+          window.localStorage.setItem(PENDING_JOIN_CODE_KEY, invite.toUpperCase());
+        }
+      } catch {}
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     return () => {
       if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
@@ -1086,10 +1150,10 @@ export default function HomePage() {
 
     setSections((prev) => {
       const user = activeUserRef.current;
-      const maxId =
-        prev[key].items.length > 0
-          ? Math.max(...prev[key].items.map((item) => item.id))
-          : 0;
+      let maxId = 0;
+      for (const item of prev[key].items) {
+        if (item.id > maxId) maxId = item.id;
+      }
 
       const newItems = cleanItems.map((text, index) => ({
         id: maxId + index + 1,
@@ -1110,7 +1174,7 @@ export default function HomePage() {
     });
   }, [pushUndoState]);
 
-  const finalizeRecording = async () => {
+  const finalizeRecording = useCallback(async () => {
     const sectionKey = recordingSectionRef.current;
     const transcript = transcriptBufferRef.current;
 
@@ -1124,9 +1188,9 @@ export default function HomePage() {
     setActiveRecording(null);
     recordingSectionRef.current = null;
     transcriptBufferRef.current = "";
-  };
+  }, [addBatchItems]);
 
-  const startRecording = (key: SectionKey) => {
+  const startRecording = useCallback((key: SectionKey) => {
     const speechWindow = window as Window & {
       SpeechRecognition?: SpeechRecognitionCtor;
       webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -1179,9 +1243,9 @@ export default function HomePage() {
     recordingSectionRef.current = key;
     setActiveRecording(key);
     recognition.start();
-  };
+  }, [finalizeRecording]);
 
-  const toggleRecording = (key: SectionKey) => {
+  const toggleRecording = useCallback((key: SectionKey) => {
     if (activeRecording === key) {
       shouldKeepRecordingRef.current = false;
       recognitionRef.current?.stop();
@@ -1194,9 +1258,9 @@ export default function HomePage() {
     }
 
     startRecording(key);
-  };
+  }, [activeRecording, startRecording]);
 
-  const toggleRecipeRecording = () => {
+  const toggleRecipeRecording = useCallback(() => {
     const speechWindow = window as Window & {
       SpeechRecognition?: SpeechRecognitionCtor;
       webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -1240,7 +1304,7 @@ export default function HomePage() {
     recipeRecognitionRef.current = recognition;
     recognition.start();
     setRecipeRecording(true);
-  };
+  }, [recipeRecording]);
 
   // Called by SectionInput.onAdd — text is already trimmed and non-empty.
   const handleAddItem = useCallback((key: SectionKey, text: string) => {
@@ -1534,7 +1598,8 @@ const saveUserProfileSettings = async () => {
     setIsUserProfileOpen(false);
   };
 
-  const saveHouseSettings = async () => {
+  const saveHouseSettings = useCallback(async () => {
+    const activeHouse = activeHouseRef.current;
     if (!activeHouse) return;
 
     const nextName = settingsHouseName.trim();
@@ -1595,14 +1660,15 @@ const saveUserProfileSettings = async () => {
     setSettingsHouseImage(finalHouseImage);
     setIsSavingSettings(false);
     setIsSettingsOpen(false);
-  };
+  }, [settingsHouseName, settingsHouseImage]);
 
-  const deleteActiveHouse = async () => {
+  const deleteActiveHouse = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
 
-    const isOwner = activeHouse.owner_user_id === activeUser.id;
-    if (!isOwner) {
+    if (activeHouse.owner_user_id !== activeUser.id) {
       setSettingsError("רק בעל הבית יכול למחוק את הבית.");
       return;
     }
@@ -1625,9 +1691,9 @@ const saveUserProfileSettings = async () => {
     setInviteToken("");
     await loadUserHouses(activeUser.id);
     setIsDeletingHouse(false);
-  };
+  }, []);
 
-  const runRecipeFallback = () => {
+  const runRecipeFallback = useCallback(() => {
     const hasAnswer = (questionId: string) =>
       !isRecipeAnswerMissing(
         { id: questionId, title: questionId, kind: "text" },
@@ -1691,9 +1757,9 @@ const saveUserProfileSettings = async () => {
     setRecipeQuestions([]);
     setRecipeItems(Array.from(items));
     setRecipeNotes("הרשימה הופקה במצב חכם מקומי.");
-  };
+  }, [recipeText, recipeAnswers]);
 
-  const runRecipeAi = async () => {
+  const runRecipeAi = useCallback(async () => {
     if (!recipeText.trim()) return;
     if (recipeQuestions.length > 0) {
       const missingQuestion = recipeQuestions.find((question) =>
@@ -1774,19 +1840,21 @@ const saveUserProfileSettings = async () => {
     } finally {
       setIsRecipeLoading(false);
     }
-  };
+  }, [recipeText, recipeQuestions, recipeAnswers, runRecipeFallback]);
 
-  const addRecipeItemsToSupermarket = () => {
+  const handleRunRecipe = useCallback(() => { void runRecipeAi(); }, [runRecipeAi]);
+
+  const addRecipeItemsToSupermarket = useCallback(() => {
     addBatchItems("supermarketShopping", recipeItems, "נוספו פריטי מתכון");
     setRecipeItems([]);
     setRecipeQuestions([]);
     setRecipeAnswers({});
     setRecipeText("");
     setIsRecipeModalOpen(false);
-  };
+  }, [recipeItems, addBatchItems]);
 
 
-  const applyActiveHouse = (house: CloudHouseRow) => {
+  const applyActiveHouse = useCallback((house: CloudHouseRow) => {
     // Discard stale data: if the incoming timestamp is older than (or equal to) what we
     // already accepted, don't overwrite — protects against race between fallback polling
     // returning old DB data after a save already completed.
@@ -1833,7 +1901,7 @@ const saveUserProfileSettings = async () => {
       },
     });
     setInvitePhone(house.invite_phone || "");
-  };
+  }, [isStaleCloudUpdate]);
 
   const loadHouseMembers = async (houseId: string) => {
     const client = supabase;
@@ -2389,8 +2457,10 @@ const saveUserProfileSettings = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeUser?.id]);
 
-  const removeMember = async (memberId: string) => {
+  const removeMember = useCallback(async (memberId: string) => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     if (activeHouse.owner_user_id !== activeUser.id) return;
     if (memberId === activeUser.id) return;
@@ -2402,10 +2472,12 @@ const saveUserProfileSettings = async () => {
     if (!error) {
       await loadHouseMembers(activeHouse.id);
     }
-  };
+  }, []);
 
-  const leaveHouse = async () => {
+  const leaveHouse = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     if (activeHouse.owner_user_id === activeUser.id) return;
     const { error } = await client
@@ -2415,10 +2487,42 @@ const saveUserProfileSettings = async () => {
       .eq("user_id", activeUser.id);
     if (!error) {
       setIsSettingsOpen(false);
-      const otherHouse = memberHouses.find((h) => h.id !== activeHouse.id);
+      const otherHouse = memberHousesRef.current.find((h) => h.id !== activeHouse.id);
       await loadUserHouses(activeUser.id, otherHouse?.id);
     }
-  };
+  }, []);
+
+  const handleSaveHouseSettings = useCallback(() => { void saveHouseSettings(); }, [saveHouseSettings]);
+  const handleDeleteHouse = useCallback(() => { void deleteActiveHouse(); }, [deleteActiveHouse]);
+  const handleLeaveHouse = useCallback(() => { void leaveHouse(); }, [leaveHouse]);
+  const handleSettingsOpenUserProfile = useCallback(() => {
+    handleCloseSettings();
+    handleOpenUserProfile();
+  }, [handleCloseSettings, handleOpenUserProfile]);
+  const handleSwitchHouse = useCallback(() => {
+    setIsSettingsOpen(false);
+    const uid = activeUserRef.current?.id;
+    if (uid) window.localStorage.removeItem(getSelectedHouseStorageKey(uid));
+    setActiveHouse(null);
+    setInviteToken("");
+  }, []);
+  const handleSignOut = useCallback(async () => {
+    if (supabase) await supabase.auth.signOut();
+    setIsSettingsOpen(false);
+    window.localStorage.removeItem(CACHED_USER_KEY);
+    setActiveUser(null);
+    setActiveHouse(null);
+    setMemberHouses([]);
+    setInviteToken("");
+    setAuthError("");
+    const uid = activeUserRef.current?.id;
+    if (uid) window.localStorage.removeItem(getSelectedHouseStorageKey(uid));
+    setUsernameInput("");
+    setUserPasswordInput("");
+    setDisplayNameInput("");
+    setUserAvatarInput("");
+  }, []);
+  const handleCloseInviteModal = useCallback(() => setIsInviteModalOpen(false), []);
 
   const openInviteModal = useCallback(async () => {
     const client = supabase;
@@ -2464,20 +2568,31 @@ const saveUserProfileSettings = async () => {
     setInviteToken(createdToken);
   }, []);
 
+  const handleSettingsOpenInvite = useCallback(() => {
+    handleCloseSettings();
+    void openInviteModal();
+  }, [handleCloseSettings, openInviteModal]);
+
   const normalizedPhone = invitePhone.replace(/[^\d+]/g, "");
-  const inviteLink = (() => {
+  const inviteLink = useMemo(() => {
     if (!homeLink || !activeHouse) return homeLink;
     const url = new URL(homeLink);
     url.searchParams.set("house", activeHouse.id);
     if (inviteToken) url.searchParams.set("invite", inviteToken);
     return url.toString();
-  })();
-  const inviteMessage = inviteLink
-    ? `היי, מזמין אותך לבית שלי ב-Homly. זה לינק הצטרפות: ${inviteLink}`
-    : "היי, מזמין אותך לבית שלי ב-Homly.";
-  const smsHref = `sms:${normalizedPhone}?body=${encodeURIComponent(inviteMessage)}`;
+  }, [homeLink, activeHouse?.id, inviteToken]);
+  const inviteMessage = useMemo(
+    () => inviteLink
+      ? `היי, מזמין אותך לבית שלי ב-Homly. זה לינק הצטרפות: ${inviteLink}`
+      : "היי, מזמין אותך לבית שלי ב-Homly.",
+    [inviteLink],
+  );
+  const smsHref = useMemo(
+    () => `sms:${normalizedPhone}?body=${encodeURIComponent(inviteMessage)}`,
+    [normalizedPhone, inviteMessage],
+  );
 
-  const shareInviteLink = async () => {
+  const shareInviteLink = useCallback(async () => {
     if (!inviteLink) return;
     void hapticLight();
     try {
@@ -2486,9 +2601,9 @@ const saveUserProfileSettings = async () => {
     } catch {
       setInviteFeedback("לא הצלחתי לשתף כרגע.");
     }
-  };
+  }, [inviteLink, inviteMessage]);
 
-  const copyInviteLink = async () => {
+  const copyInviteLink = useCallback(async () => {
     if (!inviteLink) return;
     try {
       await navigator.clipboard.writeText(inviteLink);
@@ -2496,7 +2611,7 @@ const saveUserProfileSettings = async () => {
     } catch {
       setInviteFeedback("לא הצלחתי להעתיק את הלינק.");
     }
-  };
+  }, [inviteLink]);
 
   const resolveInviteUserByIdentifier = async (identifierRaw: string) => {
     const client = supabase;
@@ -2543,8 +2658,10 @@ const saveUserProfileSettings = async () => {
     return (byUsername?.[0] as CloudUserRow | undefined) || null;
   };
 
-  const inviteMemberByIdentifier = async () => {
+  const inviteMemberByIdentifier = useCallback(async () => {
     const client = supabase;
+    const activeHouse = activeHouseRef.current;
+    const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
     const identifier = inviteIdentifierInput.trim();
     if (!identifier) {
@@ -2596,17 +2713,17 @@ const saveUserProfileSettings = async () => {
     setInviteIdentifierInput("");
     setInviteFeedback(`${targetUser.display_name} נוסף לבית בהצלחה.`);
     setInviteByUserLoading(false);
-  };
+  }, [inviteIdentifierInput]);
 
   if (!isSupabaseConfigured) {
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 shadow-xl shadow-slate-200/70">
+        <section className="w-full rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 p-6 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50">
           <HomeLogo />
-          <p className="mt-4 text-sm text-slate-600">
+          <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
             כדי לעבוד בלי מצב מקומי, צריך להגדיר Supabase ולפרוס מחדש.
           </p>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             הגדר ב־env: `NEXT_PUBLIC_SUPABASE_URL` ו־`NEXT_PUBLIC_SUPABASE_ANON_KEY`.
           </p>
         </section>
@@ -2617,9 +2734,9 @@ const saveUserProfileSettings = async () => {
   if ((!isAuthReady || isAuthResolving) && !activeUser) {
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+        <section className="w-full rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 p-6 text-center shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50">
           <HomeLogo />
-          <p className="mt-4 text-sm font-bold text-slate-700">טוען התחברות...</p>
+          <p className="mt-4 text-sm font-bold text-slate-700 dark:text-slate-200">טוען התחברות...</p>
           <LoadingBar done={isAuthReady} />
         </section>
       </main>
@@ -2738,17 +2855,17 @@ const saveUserProfileSettings = async () => {
         />
 
         {voiceError && (
-          <p className="mb-3 rounded-2xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+          <p className="mb-3 rounded-2xl bg-rose-50 dark:bg-red-900/30 px-3 py-2 text-xs font-bold text-rose-700">
             {voiceError}
           </p>
         )}
         {undoState && (
-          <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
-            <p className="text-xs font-bold text-amber-800">{undoState.label}</p>
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-yellow-900/30 px-3 py-2">
+            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">{undoState.label}</p>
             <button
               type="button"
               onClick={restoreUndo}
-              className="rounded-xl bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900 hover:bg-amber-200"
+              className="rounded-xl bg-amber-100 dark:bg-yellow-900/50 px-3 py-1 text-xs font-bold text-amber-900 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-yellow-900/70"
             >
               בטל
             </button>
@@ -2783,7 +2900,7 @@ const saveUserProfileSettings = async () => {
                 onDelete={deleteItem}
                 onToggleRecording={toggleRecording}
                 onOpenRecipeModal={openRecipeModal}
-                externalInputRefSetter={(node) => { sectionInputRefs.current[key] = node; }}
+                externalInputRefSetter={sectionInputRefSetters[key]}
               />
             ))}
           </section>
@@ -2805,7 +2922,7 @@ const saveUserProfileSettings = async () => {
               isRecipeLoading={isRecipeLoading}
               recipeRecording={recipeRecording}
               onToggleRecording={toggleRecipeRecording}
-              onRunRecipe={() => void runRecipeAi()}
+              onRunRecipe={handleRunRecipe}
               onAddToSupermarket={addRecipeItemsToSupermarket}
               onClose={handleRecipeClose}
             /></Suspense>
@@ -2824,10 +2941,10 @@ const saveUserProfileSettings = async () => {
               smsHref={smsHref}
               inviteFeedback={inviteFeedback}
               houseId={activeHouse?.id}
-              onInviteMember={() => void inviteMemberByIdentifier()}
-              onShareLink={() => void shareInviteLink()}
-              onCopyLink={() => void copyInviteLink()}
-              onClose={() => setIsInviteModalOpen(false)}
+              onInviteMember={inviteMemberByIdentifier}
+              onShareLink={shareInviteLink}
+              onCopyLink={copyInviteLink}
+              onClose={handleCloseInviteModal}
             /></Suspense>
           )}
       </div>
@@ -2870,45 +2987,14 @@ const saveUserProfileSettings = async () => {
           isDeletingHouse={isDeletingHouse}
           settingsError={settingsError}
           isOwner={activeHouse?.owner_user_id === activeUser?.id}
-          onSave={() => void saveHouseSettings()}
-          onDelete={() => void deleteActiveHouse()}
+          onSave={handleSaveHouseSettings}
+          onDelete={handleDeleteHouse}
           onClose={handleCloseSettings}
-          onOpenUserProfile={() => {
-            handleCloseSettings();
-            handleOpenUserProfile();
-          }}
-          onOpenInvite={() => {
-            handleCloseSettings();
-            void openInviteModal();
-          }}
-          onSwitchHouse={() => {
-            setIsSettingsOpen(false);
-            if (activeUser?.id) {
-              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-            }
-            setActiveHouse(null);
-            setInviteToken("");
-          }}
-          onSignOut={async () => {
-            if (supabase) {
-              await supabase.auth.signOut();
-            }
-            setIsSettingsOpen(false);
-            window.localStorage.removeItem(CACHED_USER_KEY);
-            setActiveUser(null);
-            setActiveHouse(null);
-            setMemberHouses([]);
-            setInviteToken("");
-            setAuthError("");
-            if (activeUser?.id) {
-              window.localStorage.removeItem(getSelectedHouseStorageKey(activeUser.id));
-            }
-            setUsernameInput("");
-            setUserPasswordInput("");
-            setDisplayNameInput("");
-            setUserAvatarInput("");
-          }}
-          onLeaveHouse={() => void leaveHouse()}
+          onOpenUserProfile={handleSettingsOpenUserProfile}
+          onOpenInvite={handleSettingsOpenInvite}
+          onSwitchHouse={handleSwitchHouse}
+          onSignOut={handleSignOut}
+          onLeaveHouse={handleLeaveHouse}
         /></Suspense>
       )}
     </main>

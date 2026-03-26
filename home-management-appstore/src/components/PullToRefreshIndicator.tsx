@@ -28,7 +28,7 @@ export function PullToRefreshIndicator({
         transition: "padding-top 0.15s",
       }}
     >
-      <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg shadow-slate-200">
+      <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-slate-800 shadow-lg shadow-slate-200 dark:shadow-slate-900/50">
         <svg
           viewBox="0 0 34 34"
           className={`absolute inset-0 h-full w-full -rotate-90 ${isRefreshing ? "animate-spin" : ""}`}
@@ -61,7 +61,7 @@ export function PullToRefreshIndicator({
         ) : (
           <svg
             viewBox="0 0 24 24"
-            className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400"}`}
+            className={`relative z-10 h-4 w-4 ${progress >= 1 || isRefreshing ? "text-teal-500" : "text-slate-400 dark:text-slate-500"}`}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"

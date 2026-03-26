@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare } from "@/lib/capacitor";
+import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare, setupStatusBar, hideSplashScreen, addNetworkListener, addAppStateListener, addAppUrlOpenListener } from "@/lib/capacitor";
 import {
   DndContext,
   DragEndEvent,
@@ -1007,6 +1007,54 @@ export default function HomePage() {
       ).then((fn) => { cleanup = fn; });
     });
     return () => { cleanup?.(); };
+  }, []);
+
+  // Capacitor Status Bar + Splash Screen — setup on mount
+  useEffect(() => {
+    setupStatusBar();
+    hideSplashScreen();
+  }, []);
+
+  // Capacitor Network — online/offline detection
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addNetworkListener((connected) => {
+      if (!connected) {
+        document.body.classList.add("offline");
+      } else {
+        document.body.classList.remove("offline");
+      }
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // Capacitor App — refresh data on app resume (native equivalent of visibilitychange)
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addAppStateListener(() => {
+      const userId = activeUserRef.current?.id;
+      const houseId = activeHouseRef.current?.id;
+      if (userId) void loadUserHouses(userId, houseId);
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Capacitor Universal Links — handle invite URLs when app is already open
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    addAppUrlOpenListener((url) => {
+      try {
+        const parsed = new URL(url);
+        const invite = parsed.searchParams.get("invite") ?? parsed.searchParams.get("house");
+        if (invite) {
+          setJoinTokenInput(invite.toUpperCase());
+          window.localStorage.setItem(PENDING_JOIN_CODE_KEY, invite.toUpperCase());
+        }
+      } catch {}
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2670,12 +2718,12 @@ const saveUserProfileSettings = async () => {
   if (!isSupabaseConfigured) {
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 shadow-xl shadow-slate-200/70">
+        <section className="w-full rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 p-6 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50">
           <HomeLogo />
-          <p className="mt-4 text-sm text-slate-600">
+          <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
             כדי לעבוד בלי מצב מקומי, צריך להגדיר Supabase ולפרוס מחדש.
           </p>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             הגדר ב־env: `NEXT_PUBLIC_SUPABASE_URL` ו־`NEXT_PUBLIC_SUPABASE_ANON_KEY`.
           </p>
         </section>
@@ -2686,9 +2734,9 @@ const saveUserProfileSettings = async () => {
   if ((!isAuthReady || isAuthResolving) && !activeUser) {
     return (
       <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl items-center px-4 py-8">
-        <section className="w-full rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl shadow-slate-200/70">
+        <section className="w-full rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 p-6 text-center shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50">
           <HomeLogo />
-          <p className="mt-4 text-sm font-bold text-slate-700">טוען התחברות...</p>
+          <p className="mt-4 text-sm font-bold text-slate-700 dark:text-slate-200">טוען התחברות...</p>
           <LoadingBar done={isAuthReady} />
         </section>
       </main>
@@ -2807,17 +2855,17 @@ const saveUserProfileSettings = async () => {
         />
 
         {voiceError && (
-          <p className="mb-3 rounded-2xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+          <p className="mb-3 rounded-2xl bg-rose-50 dark:bg-red-900/30 px-3 py-2 text-xs font-bold text-rose-700">
             {voiceError}
           </p>
         )}
         {undoState && (
-          <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
-            <p className="text-xs font-bold text-amber-800">{undoState.label}</p>
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-yellow-900/30 px-3 py-2">
+            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">{undoState.label}</p>
             <button
               type="button"
               onClick={restoreUndo}
-              className="rounded-xl bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900 hover:bg-amber-200"
+              className="rounded-xl bg-amber-100 dark:bg-yellow-900/50 px-3 py-1 text-xs font-bold text-amber-900 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-yellow-900/70"
             >
               בטל
             </button>

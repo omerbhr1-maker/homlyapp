@@ -1,4 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { config } from "dotenv";
+import { resolve } from "path";
+
+// Load test credentials from tests/.env.test if it exists
+config({ path: resolve(__dirname, "tests/.env.test") });
 
 export default defineConfig({
   testDir: "./tests",
