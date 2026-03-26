@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractOutputText, type OpenAIResponsesPayload } from "@/lib/openai";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 type SectionKey = "homeTasks" | "generalShopping" | "supermarketShopping";
 
@@ -51,6 +52,11 @@ export function OPTIONS() {
 }
 
 export async function POST(request: Request) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return jsonWithCors<ParseResponse>({ items: [], source: "fallback" }, { status: 429 });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   const body = (await request.json().catch(() => ({}))) as ParseRequest;
   const text = String(body.text || "").trim();
@@ -64,6 +70,10 @@ export async function POST(request: Request) {
 
   if (!text) {
     return jsonWithCors<ParseResponse>({ items: [], source: "fallback" });
+  }
+
+  if (text.length > 10000) {
+    return jsonWithCors<ParseResponse>(fallbackItems(text.slice(0, 10000)));
   }
 
   if (!apiKey) {
@@ -86,44 +96,48 @@ export async function POST(request: Request) {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: "gpt-4.1",
-        input: prompt,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "recording_item_parser",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                items: {
-                  type: "array",
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: "gpt-4.1",
+          input: prompt,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "recording_item_parser",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
                   items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                      },
+                      required: ["name"],
+                      additionalProperties: false,
                     },
-                    required: ["name"],
-                    additionalProperties: false,
                   },
                 },
+                required: ["items"],
+                additionalProperties: false,
               },
-              required: ["items"],
-              additionalProperties: false,
             },
           },
-        },
-      }),
-    });
-    clearTimeout(timeout);
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       return jsonWithCors<ParseResponse>(fallbackItems(text));

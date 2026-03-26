@@ -31,7 +31,7 @@ export function PullToRefreshIndicator({
       <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-slate-800 shadow-lg shadow-slate-200 dark:shadow-slate-900/50">
         <svg
           viewBox="0 0 34 34"
-          className={`absolute inset-0 h-full w-full -rotate-90 ${isRefreshing ? "animate-spin" : ""}`}
+          className={`absolute inset-0 h-full w-full -rotate-90 ${isRefreshing || isPtrDone ? "animate-spin" : ""}`}
         >
           <circle cx="17" cy="17" r={r} fill="none" stroke="#e2e8f0" strokeWidth="2" />
           <circle
