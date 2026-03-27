@@ -104,10 +104,10 @@ export async function requestPushPermission(): Promise<string | null> {
     return await new Promise((resolve) => {
       PushNotifications.addListener("registration", (token) => {
         resolve(token.value);
-      });
+      }).catch(() => resolve(null));
       PushNotifications.addListener("registrationError", () => {
         resolve(null);
-      });
+      }).catch(() => {});
       setTimeout(() => resolve(null), 10000);
     });
   } catch {

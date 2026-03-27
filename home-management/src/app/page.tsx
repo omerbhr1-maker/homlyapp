@@ -2196,15 +2196,17 @@ const saveUserProfileSettings = async () => {
   };
 
   const registerPushToken = async (userId: string) => {
-    const client = supabase;
-    if (!client) return;
-    const { requestPushPermission } = await import("@/lib/capacitor");
-    const token = await requestPushPermission();
-    if (!token) return;
-    await client.from("push_tokens").upsert(
-      { user_id: userId, token, platform: "ios", updated_at: new Date().toISOString() },
-      { onConflict: "user_id,token" }
-    );
+    try {
+      const client = supabase;
+      if (!client) return;
+      const { requestPushPermission } = await import("@/lib/capacitor");
+      const token = await requestPushPermission();
+      if (!token) return;
+      await client.from("push_tokens").upsert(
+        { user_id: userId, token, platform: "ios", updated_at: new Date().toISOString() },
+        { onConflict: "user_id,token" }
+      );
+    } catch {}
   };
 
   const handleForgotPassword = async () => {
