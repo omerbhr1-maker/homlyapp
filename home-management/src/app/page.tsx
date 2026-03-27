@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { hapticLight, hapticHeavy, hapticNotificationSuccess, nativeShare, setupStatusBar, hideSplashScreen, addNetworkListener, addAppStateListener, addAppUrlOpenListener } from "@/lib/capacitor";
 import { initMonitoring } from "@/lib/monitoring";
 import {
@@ -107,44 +107,23 @@ export default function HomePage() {
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [userAvatarInput, setUserAvatarInput] = useState("");
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
-  const [forgotPasswordIdentifier, setForgotPasswordIdentifier] = useState("");
-  const [forgotPasswordError, setForgotPasswordError] = useState("");
-  const [forgotPasswordFeedback, setForgotPasswordFeedback] = useState("");
-  const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false);
+  const [forgotPwd, setForgotPwd] = useState({ identifier: "", error: "", feedback: "", loading: false });
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
-  const [recoveryPasswordInput, setRecoveryPasswordInput] = useState("");
-  const [recoveryPasswordConfirmInput, setRecoveryPasswordConfirmInput] = useState("");
-  const [recoveryPasswordError, setRecoveryPasswordError] = useState("");
-  const [recoveryPasswordFeedback, setRecoveryPasswordFeedback] = useState("");
-  const [isRecoveryPasswordLoading, setIsRecoveryPasswordLoading] = useState(false);
+  const [recoveryPwd, setRecoveryPwd] = useState({ input: "", confirm: "", error: "", feedback: "", loading: false });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthResolving, setIsAuthResolving] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
-  const [settingsHouseName, setSettingsHouseName] = useState("");
-  const [settingsHouseImage, setSettingsHouseImage] = useState("");
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [isDeletingHouse, setIsDeletingHouse] = useState(false);
-  const [settingsError, setSettingsError] = useState("");
-  const [userProfileName, setUserProfileName] = useState("");
-  const [userProfileImage, setUserProfileImage] = useState("");
-  const [isSavingUserProfile, setIsSavingUserProfile] = useState(false);
-  const [userProfileError, setUserProfileError] = useState("");
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({ houseName: "", houseImage: "", saving: false, deleting: false, error: "" });
+  const [profileForm, setProfileForm] = useState({ name: "", image: "", saving: false, error: "", processingImage: false });
   const [desktopQuery, setDesktopQuery] = useState("");
   const [desktopFilter, setDesktopFilter] = useState<"all" | "open" | "done">("all");
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [inviteFeedback, setInviteFeedback] = useState("");
-  const [inviteIdentifierInput, setInviteIdentifierInput] = useState("");
-  const [inviteByUserLoading, setInviteByUserLoading] = useState(false);
-  const [houseCreateNameInput, setHouseCreateNameInput] = useState("");
-  const [houseCreateLoading, setHouseCreateLoading] = useState(false);
-  const [joinTokenInput, setJoinTokenInput] = useState("");
-  const [joinLoading, setJoinLoading] = useState(false);
-  const [houseListError, setHouseListError] = useState("");
+  const [inviteForm, setInviteForm] = useState({ identifier: "", feedback: "", loading: false });
+  const [houseForm, setHouseForm] = useState({ createName: "", createLoading: false, joinToken: "", joinLoading: false, error: "" });
   const [inviteToken, setInviteToken] = useState("");
 
   const [activeUser, setActiveUser] = useState<CloudUserRow | null>(null);
@@ -178,14 +157,16 @@ export default function HomePage() {
   const [voiceError, setVoiceError] = useState("");
 
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
-  const [recipeText, setRecipeText] = useState("");
-  const [recipeQuestions, setRecipeQuestions] = useState<RecipeQuestion[]>([]);
-  const [recipeAnswers, setRecipeAnswers] = useState<Record<string, RecipeAnswerValue>>({});
-  const [recipeItems, setRecipeItems] = useState<string[]>([]);
-  const [recipeNotes, setRecipeNotes] = useState("");
-  const [recipeError, setRecipeError] = useState("");
-  const [isRecipeLoading, setIsRecipeLoading] = useState(false);
-  const [recipeRecording, setRecipeRecording] = useState(false);
+  const [recipe, setRecipe] = useState<{
+    text: string;
+    questions: RecipeQuestion[];
+    answers: Record<string, RecipeAnswerValue>;
+    items: string[];
+    notes: string;
+    error: string;
+    loading: boolean;
+    recording: boolean;
+  }>({ text: "", questions: [], answers: {}, items: [], notes: "", error: "", loading: false, recording: false });
   const [dragOverlayItem, setDragOverlayItem] = useState<Item | null>(null);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -259,9 +240,10 @@ export default function HomePage() {
     [houseMembers],
   );
 
+  const deferredDesktopQuery = useDeferredValue(desktopQuery);
   const normalizedDesktopQuery = useMemo(
-    () => desktopQuery.trim().toLowerCase(),
-    [desktopQuery],
+    () => deferredDesktopQuery.trim().toLowerCase(),
+    [deferredDesktopQuery],
   );
 
   const sectionStats = useMemo(() => {
@@ -319,20 +301,20 @@ export default function HomePage() {
           const parsedHouseMeta = JSON.parse(cachedHouseMetaRaw) as CachedHouseMeta;
           setCachedHouseMeta((current) => current || parsedHouseMeta);
 
-          const cachedMembersRaw = await appCacheStorage.getItem(
-            getCachedHouseMembersStorageKey(parsedHouseMeta.id),
-          );
-          if (cachedMembersRaw && !cancelled) {
+          // Fetch members and sections in parallel — no dependency between them.
+          const [cachedMembersRaw, cachedSectionsRaw] = await Promise.all([
+            appCacheStorage.getItem(getCachedHouseMembersStorageKey(parsedHouseMeta.id)),
+            appCacheStorage.getItem(getCachedHouseSectionsStorageKey(parsedHouseMeta.id)),
+          ]);
+          if (cancelled) return;
+          if (cachedMembersRaw) {
             const parsedMembers = JSON.parse(cachedMembersRaw) as HouseMemberUser[];
             if (Array.isArray(parsedMembers)) {
               setHouseMembers((current) => (current.length > 0 ? current : parsedMembers));
             }
           }
           // Restore cached list items for instant display before network loads.
-          const cachedSectionsRaw = await appCacheStorage.getItem(
-            getCachedHouseSectionsStorageKey(parsedHouseMeta.id),
-          );
-          if (cachedSectionsRaw && !cancelled) {
+          if (cachedSectionsRaw) {
             try {
               const parsedSections = JSON.parse(cachedSectionsRaw) as Record<SectionKey, Item[]>;
               const normalized = normalizeCloudSections(parsedSections);
@@ -415,7 +397,7 @@ export default function HomePage() {
     const houseFromUrl = query.get("house")?.trim();
     const joinCodeFromUrl = inviteFromUrl || houseFromUrl;
     if (joinCodeFromUrl) {
-      setJoinTokenInput(joinCodeFromUrl.toUpperCase());
+      setHouseForm(p => ({...p, joinToken: joinCodeFromUrl.toUpperCase()}));
       window.localStorage.setItem(PENDING_JOIN_CODE_KEY, joinCodeFromUrl.toUpperCase());
     }
     if (houseFromUrl) {
@@ -709,7 +691,7 @@ export default function HomePage() {
       isHousePersistingRef.current = false;
       hasPendingLocalChangesRef.current = false;
       if (error) {
-        setHouseListError("שמירת השינויים נכשלה, מנסה לרענן מהענן...");
+        setHouseForm(p => ({...p, error: "שמירת השינויים נכשלה, מנסה לרענן מהענן..."}));
         if (user?.id) {
           void loadUserHouses(user.id, house.id);
         }
@@ -721,7 +703,7 @@ export default function HomePage() {
         lastAcceptedCloudUpdatedAtRef.current = String(savedRow.updated_at);
       }
 
-      setHouseListError("");
+      setHouseForm(p => ({...p, error: ""}));
       // Cache sections for instant display on next app open.
       void setPersistentCacheValue(
         getCachedHouseSectionsStorageKey(house.id),
@@ -745,31 +727,22 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!isSettingsOpen || !activeHouse) return;
-    setSettingsHouseName(activeHouse.name);
-    setSettingsHouseImage(activeHouse.house_image || "");
-    setSettingsError("");
+    setSettingsForm({ houseName: activeHouse.name, houseImage: activeHouse.house_image || "", saving: false, deleting: false, error: "" });
   }, [isSettingsOpen, activeHouse?.id, activeHouse?.name, activeHouse?.house_image]);
 
   useEffect(() => {
     if (!isUserProfileOpen || !activeUser) return;
-    setUserProfileName(activeUser.display_name || "");
-    setUserProfileImage(activeUser.avatar_url || "");
-    setUserProfileError("");
+    setProfileForm(p => ({ ...p, name: activeUser.display_name || "", image: activeUser.avatar_url || "", error: "" }));
   }, [isUserProfileOpen, activeUser?.id, activeUser?.display_name, activeUser?.avatar_url]);
 
   useEffect(() => {
     if (!isRecipeModalOpen) return;
-    setRecipeText("");
-    setRecipeQuestions([]);
-    setRecipeAnswers({});
-    setRecipeItems([]);
-    setRecipeNotes("");
-    setRecipeError("");
+    setRecipe({ text: "", questions: [], answers: {}, items: [], notes: "", error: "", loading: false, recording: false });
   }, [isRecipeModalOpen]);
 
   useEffect(() => {
     setInviteToken("");
-    setInviteFeedback("");
+    setInviteForm(p => ({...p, feedback: ""}));
   }, [activeHouse?.id]);
 
   useEffect(() => {
@@ -1050,13 +1023,12 @@ export default function HomePage() {
         const parsed = new URL(url);
         const invite = parsed.searchParams.get("invite") ?? parsed.searchParams.get("house");
         if (invite) {
-          setJoinTokenInput(invite.toUpperCase());
+          setHouseForm(p => ({...p, joinToken: invite.toUpperCase()}));
           window.localStorage.setItem(PENDING_JOIN_CODE_KEY, invite.toUpperCase());
         }
       } catch {}
     }).then((fn) => { cleanup = fn; });
     return () => { cleanup?.(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1103,6 +1075,13 @@ export default function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Register Service Worker for web PWA caching (no-op in Capacitor).
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js");
+    }
   }, []);
 
   const parseRecordingWithAI = async (sectionKey: SectionKey, text: string) => {
@@ -1271,13 +1250,13 @@ export default function HomePage() {
       speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
 
     if (!RecognitionClass) {
-      setRecipeError("הדפדפן לא תומך בהקלטה למתכון.");
+      setRecipe(p => ({...p, error: "הדפדפן לא תומך בהקלטה למתכון."}));
       return;
     }
 
-    if (recipeRecording) {
+    if (recipe.recording) {
       recipeRecognitionRef.current?.stop();
-      setRecipeRecording(false);
+      setRecipe(p => ({...p, recording: false}));
       return;
     }
 
@@ -1291,22 +1270,21 @@ export default function HomePage() {
       for (let i = 0; i < event.results.length; i += 1) {
         text += `${event.results[i]?.[0]?.transcript ?? ""} `;
       }
-      setRecipeText(text.trim());
+      setRecipe(p => ({...p, text: text.trim()}));
     };
 
     recognition.onend = () => {
-      setRecipeRecording(false);
+      setRecipe(p => ({...p, recording: false}));
     };
 
     recognition.onerror = () => {
-      setRecipeRecording(false);
-      setRecipeError("שגיאה בהקלטת מתכון. נסה שוב.");
+      setRecipe(p => ({...p, recording: false, error: "שגיאה בהקלטת מתכון. נסה שוב."}));
     };
 
     recipeRecognitionRef.current = recognition;
     recognition.start();
-    setRecipeRecording(true);
-  }, [recipeRecording]);
+    setRecipe(p => ({...p, recording: true}));
+  }, [recipe.recording]);
 
   // Called by SectionInput.onAdd — text is already trimmed and non-empty.
   const handleAddItem = useCallback((key: SectionKey, text: string) => {
@@ -1319,36 +1297,21 @@ export default function HomePage() {
     if (isCompleting) void hapticNotificationSuccess(); else void hapticLight();
     saveImmediatelyRef.current = true;
     pushUndoState("עודכן פריט");
-    setSections((prev) => {
-      const next = {
-        ...prev,
-        [key]: {
-          ...prev[key],
-          items: prev[key].items.map((item) =>
-            item.id === id ? { ...item, completed: !item.completed } : item,
-          ),
-        },
-      };
-      if (activeHouseRef.current) {
-        try {
-          window.localStorage.setItem(
-            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
-            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
-          );
-        } catch {}
-      }
-      return next;
-    });
+    setSections((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        items: prev[key].items.map((item) =>
+          item.id === id ? { ...item, completed: !item.completed } : item,
+        ),
+      },
+    }));
   }, [pushUndoState]);
 
-  const editItem = useCallback((key: SectionKey, id: number) => {
-    const currentItem = sectionsRef.current[key].items.find((item) => item.id === id);
-    if (!currentItem) return;
-    const nextText = window.prompt("עריכת פריט", currentItem.text);
-    if (nextText === null) return;
-    const normalized = nextText.trim();
-    if (!normalized || normalized === currentItem.text) return;
-
+  const editItem = useCallback((key: SectionKey, id: number, newText: string) => {
+    const normalized = newText.trim();
+    const currentText = sectionsRef.current[key].items.find((i) => i.id === id)?.text;
+    if (!normalized || normalized === currentText) return;
     pushUndoState("נערך פריט");
     setSections((prev) => ({
       ...prev,
@@ -1365,43 +1328,27 @@ export default function HomePage() {
     void hapticHeavy();
     saveImmediatelyRef.current = true;
     pushUndoState("נמחק פריט");
-    setSections((prev) => {
-      const next = {
-        ...prev,
-        [key]: {
-          ...prev[key],
-          items: prev[key].items.filter((item) => item.id !== id),
-        },
-      };
-      if (activeHouseRef.current) {
-        try {
-          window.localStorage.setItem(
-            getCachedHouseSectionsStorageKey(activeHouseRef.current.id),
-            JSON.stringify({ homeTasks: next.homeTasks.items, generalShopping: next.generalShopping.items, supermarketShopping: next.supermarketShopping.items }),
-          );
-        } catch {}
-      }
-      return next;
-    });
+    setSections((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        items: prev[key].items.filter((item) => item.id !== id),
+      },
+    }));
   }, [pushUndoState]);
 
   const openRecipeModal = useCallback(() => {
-    setRecipeError("");
-    setRecipeNotes("");
-    setRecipeQuestions([]);
-    setRecipeItems([]);
-    setRecipeAnswers({});
+    setRecipe(p => ({...p, error: "", notes: "", questions: [], items: [], answers: {}}));
     setIsRecipeModalOpen(true);
   }, []);
 
   const handleRecipeAnswerChange = useCallback((questionId: string, value: RecipeAnswerValue) => {
-    setRecipeError("");
-    setRecipeAnswers((prev) => ({ ...prev, [questionId]: value }));
+    setRecipe(p => ({...p, error: "", answers: {...p.answers, [questionId]: value}}));
   }, []);
 
   const handleRecipeClose = useCallback(() => {
     setIsRecipeModalOpen(false);
-    setRecipeRecording(false);
+    setRecipe(p => ({...p, recording: false}));
     recipeRecognitionRef.current?.stop();
   }, []);
 
@@ -1470,24 +1417,24 @@ export default function HomePage() {
 
   const handleSettingsImageFile = async (file?: File) => {
     if (!file) return;
-    setIsProcessingImage(true);
-    setSettingsError("");
+    setSettingsForm(p => ({...p, error: ""}));
+    setProfileForm(p => ({...p, processingImage: true}));
     const value = await optimizeImageFile(file, 1280, 0.8);
-    setIsProcessingImage(false);
+    setProfileForm(p => ({...p, processingImage: false}));
     if (!value) {
-      setSettingsError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      setSettingsForm(p => ({...p, error: "התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB)."}));
       return;
     }
-    setSettingsHouseImage(value);
+    setSettingsForm(p => ({...p, houseImage: value}));
   };
 
   const handleUserAvatarFile = async (file?: File) => {
     if (!file) return;
-    setIsProcessingImage(true);
+    setProfileForm(p => ({...p, processingImage: true}));
     const value = await optimizeImageFile(file, 640, 0.82);
-    setIsProcessingImage(false);
+    setProfileForm(p => ({...p, processingImage: false}));
     if (!value) {
-      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
+      setProfileForm(p => ({...p, error: "התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB)."}));
       return;
     }
     setUserAvatarInput(value);
@@ -1499,23 +1446,21 @@ export default function HomePage() {
 
   const handleUserProfileImageFile = async (file?: File) => {
     if (!file) return;
-    setIsProcessingImage(true);
-    setUserProfileError("");
+    setProfileForm(p => ({...p, processingImage: true, error: ""}));
     const base64 = await optimizeImageFile(file, 640, 0.82);
     if (!base64) {
-      setUserProfileError("התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).");
-      setIsProcessingImage(false);
+      setProfileForm(p => ({...p, error: "התמונה גדולה מדי או פגומה. נסה תמונה קטנה יותר (עד 5MB).", processingImage: false}));
       return;
     }
     // Show preview immediately — no flash waiting for upload.
-    setUserProfileImage(base64);
+    setProfileForm(p => ({...p, image: base64}));
     // Upload to Storage in the background; replace base64 with the stable URL.
     const userId = activeUser?.id;
     if (userId) {
       const url = await uploadImageToStorage(base64, `avatars/${userId}.jpg`);
-      setUserProfileImage(url);
+      setProfileForm(p => ({...p, image: url}));
     }
-    setIsProcessingImage(false);
+    setProfileForm(p => ({...p, processingImage: false}));
   };
 
   const openUserProfileImagePicker = () => {
@@ -1526,21 +1471,20 @@ const saveUserProfileSettings = async () => {
     const client = supabase;
     if (!client || !activeUser) return;
 
-    const nextName = userProfileName.trim();
+    const nextName = profileForm.name.trim();
     if (nextName.length < 2) {
-      setUserProfileError("שם משתמש לתצוגה חייב להכיל לפחות 2 תווים.");
+      setProfileForm(p => ({...p, error: "שם משתמש לתצוגה חייב להכיל לפחות 2 תווים."}));
       return;
     }
 
-    setIsSavingUserProfile(true);
-    setUserProfileError("");
+    setProfileForm(p => ({...p, saving: true, error: ""}));
 
     // Upload avatar to Storage if it's still a base64 preview (same pattern as house image save).
     const finalAvatarUrl = await uploadImageToStorage(
-      userProfileImage.trim(),
+      profileForm.image.trim(),
       `avatars/${activeUser.id}.jpg`,
     );
-    if (finalAvatarUrl !== userProfileImage) setUserProfileImage(finalAvatarUrl);
+    if (finalAvatarUrl !== profileForm.image) setProfileForm(p => ({...p, image: finalAvatarUrl}));
 
     const { error } = await client
       .from("app_users")
@@ -1551,8 +1495,7 @@ const saveUserProfileSettings = async () => {
       .eq("id", activeUser.id);
 
     if (error) {
-      setUserProfileError("שמירת הפרופיל נכשלה. נסה שוב.");
-      setIsSavingUserProfile(false);
+      setProfileForm(p => ({...p, error: "שמירת הפרופיל נכשלה. נסה שוב.", saving: false}));
       return;
     }
 
@@ -1596,7 +1539,7 @@ const saveUserProfileSettings = async () => {
       };
     });
 
-    setIsSavingUserProfile(false);
+    setProfileForm(p => ({...p, saving: false}));
     setIsUserProfileOpen(false);
   };
 
@@ -1604,18 +1547,17 @@ const saveUserProfileSettings = async () => {
     const activeHouse = activeHouseRef.current;
     if (!activeHouse) return;
 
-    const nextName = settingsHouseName.trim();
+    const nextName = settingsForm.houseName.trim();
     if (nextName.length < 2) {
-      setSettingsError("שם בית חייב להכיל לפחות 2 תווים.");
+      setSettingsForm(p => ({...p, error: "שם בית חייב להכיל לפחות 2 תווים."}));
       return;
     }
 
-    setIsSavingSettings(true);
-    setSettingsError("");
+    setSettingsForm(p => ({...p, saving: true, error: ""}));
 
     const client = supabase;
     if (!client) {
-      setIsSavingSettings(false);
+      setSettingsForm(p => ({...p, saving: false}));
       return;
     }
 
@@ -1627,20 +1569,18 @@ const saveUserProfileSettings = async () => {
       .maybeSingle();
 
     if (duplicateError) {
-      setSettingsError("שמירת ההגדרות נכשלה. נסה שוב.");
-      setIsSavingSettings(false);
+      setSettingsForm(p => ({...p, error: "שמירת ההגדרות נכשלה. נסה שוב.", saving: false}));
       return;
     }
 
     if (duplicate) {
-      setSettingsError("שם הבית כבר תפוס. בחר שם אחר.");
-      setIsSavingSettings(false);
+      setSettingsForm(p => ({...p, error: "שם הבית כבר תפוס. בחר שם אחר.", saving: false}));
       return;
     }
 
     // Upload house image to Storage if it's still a base64 preview.
     const finalHouseImage = await uploadImageToStorage(
-      settingsHouseImage.trim(),
+      settingsForm.houseImage.trim(),
       `houses/${activeHouse.id}.jpg`,
     );
 
@@ -1651,18 +1591,16 @@ const saveUserProfileSettings = async () => {
       .eq("id", activeHouse.id);
 
     if (updateError) {
-      setSettingsError("שמירת ההגדרות נכשלה. נסה שוב.");
-      setIsSavingSettings(false);
+      setSettingsForm(p => ({...p, error: "שמירת ההגדרות נכשלה. נסה שוב.", saving: false}));
       return;
     }
 
     setActiveHouse((prev) =>
       prev ? { ...prev, name: nextName, house_image: finalHouseImage } : prev,
     );
-    setSettingsHouseImage(finalHouseImage);
-    setIsSavingSettings(false);
+    setSettingsForm(p => ({...p, houseImage: finalHouseImage, saving: false}));
     setIsSettingsOpen(false);
-  }, [settingsHouseName, settingsHouseImage]);
+  }, [settingsForm.houseName, settingsForm.houseImage]);
 
   const deleteActiveHouse = useCallback(async () => {
     const client = supabase;
@@ -1671,20 +1609,18 @@ const saveUserProfileSettings = async () => {
     if (!client || !activeHouse || !activeUser) return;
 
     if (activeHouse.owner_user_id !== activeUser.id) {
-      setSettingsError("רק בעל הבית יכול למחוק את הבית.");
+      setSettingsForm(p => ({...p, error: "רק בעל הבית יכול למחוק את הבית."}));
       return;
     }
 
     const confirmed = window.confirm("למחוק את הבית לצמיתות? כל הרשימות והחברים יימחקו.");
     if (!confirmed) return;
 
-    setIsDeletingHouse(true);
-    setSettingsError("");
+    setSettingsForm(p => ({...p, deleting: true, error: ""}));
 
     const { error } = await client.from("houses").delete().eq("id", activeHouse.id);
     if (error) {
-      setSettingsError("מחיקת הבית נכשלה. נסה שוב.");
-      setIsDeletingHouse(false);
+      setSettingsForm(p => ({...p, error: "מחיקת הבית נכשלה. נסה שוב.", deleting: false}));
       return;
     }
 
@@ -1692,19 +1628,19 @@ const saveUserProfileSettings = async () => {
     setIsSettingsOpen(false);
     setInviteToken("");
     await loadUserHouses(activeUser.id);
-    setIsDeletingHouse(false);
+    setSettingsForm(p => ({...p, deleting: false}));
   }, []);
 
   const runRecipeFallback = useCallback(() => {
     const hasAnswer = (questionId: string) =>
       !isRecipeAnswerMissing(
         { id: questionId, title: questionId, kind: "text" },
-        recipeAnswers[questionId],
+        recipe.answers[questionId],
       );
-    const answerValues = (questionId: string) => getRecipeAnswerValues(recipeAnswers[questionId]);
+    const answerValues = (questionId: string) => getRecipeAnswerValues(recipe.answers[questionId]);
 
     const q: RecipeQuestion[] = [];
-    if (!/\d/.test(recipeText) && !hasAnswer("servings")) {
+    if (!/\d/.test(recipe.text) && !hasAnswer("servings")) {
       q.push({
         id: "servings",
         title: "לכמה אנשים המתכון?",
@@ -1712,7 +1648,7 @@ const saveUserProfileSettings = async () => {
         options: ["2", "4", "6", "8"],
       });
     }
-    if (/פסטה|רוטב|לזניה/.test(recipeText) && !hasAnswer("sauce")) {
+    if (/פסטה|רוטב|לזניה/.test(recipe.text) && !hasAnswer("sauce")) {
       q.push({
         id: "sauce",
         title: "איזה רוטב תרצה?",
@@ -1720,7 +1656,7 @@ const saveUserProfileSettings = async () => {
         options: ["עגבניות", "שמנת", "פסטו"],
       });
     }
-    if (/ירקות|סלט|מוקפץ|מרק ירקות/.test(recipeText) && answerValues("vegetables").length === 0) {
+    if (/ירקות|סלט|מוקפץ|מרק ירקות/.test(recipe.text) && answerValues("vegetables").length === 0) {
       q.push({
         id: "vegetables",
         title: "איזה ירקות להוסיף? (אפשר לבחור כמה)",
@@ -1730,52 +1666,46 @@ const saveUserProfileSettings = async () => {
       });
     }
     if (q.length > 0) {
-      setRecipeQuestions(normalizeRecipeQuestions(q));
-      setRecipeItems([]);
-      setRecipeNotes("");
+      setRecipe(p => ({...p, questions: normalizeRecipeQuestions(q), items: [], notes: ""}));
       return;
     }
 
-    const base = splitTranscriptToItems(recipeText);
+    const base = splitTranscriptToItems(recipe.text);
     const items = new Set<string>(base);
-    if (/עוף/.test(recipeText)) {
+    if (/עוף/.test(recipe.text)) {
       items.add("חזה עוף");
       items.add("שום");
       items.add("שמן זית");
     }
-    if (/פסטה/.test(recipeText)) {
+    if (/פסטה/.test(recipe.text)) {
       items.add("פסטה");
       if (answerValues("sauce").includes("שמנת")) items.add("שמנת לבישול");
       if (answerValues("sauce").includes("עגבניות") || !hasAnswer("sauce")) {
         items.add("רוטב עגבניות");
       }
     }
-    if (/סלט/.test(recipeText)) {
+    if (/סלט/.test(recipe.text)) {
       items.add("עגבניות");
       items.add("מלפפון");
       items.add("לימון");
     }
     answerValues("vegetables").forEach((vegetable) => items.add(vegetable));
-    setRecipeQuestions([]);
-    setRecipeItems(Array.from(items));
-    setRecipeNotes("הרשימה הופקה במצב חכם מקומי.");
-  }, [recipeText, recipeAnswers]);
+    setRecipe(p => ({...p, questions: [], items: Array.from(items), notes: "הרשימה הופקה במצב חכם מקומי."}));
+  }, [recipe.text, recipe.answers]);
 
   const runRecipeAi = useCallback(async () => {
-    if (!recipeText.trim()) return;
-    if (recipeQuestions.length > 0) {
-      const missingQuestion = recipeQuestions.find((question) =>
-        isRecipeAnswerMissing(question, recipeAnswers[question.id]),
+    if (!recipe.text.trim()) return;
+    if (recipe.questions.length > 0) {
+      const missingQuestion = recipe.questions.find((question) =>
+        isRecipeAnswerMissing(question, recipe.answers[question.id]),
       );
       if (missingQuestion) {
-        setRecipeError("יש להשלים תשובה לכל השאלות לפני המשך ניתוח.");
+        setRecipe(p => ({...p, error: "יש להשלים תשובה לכל השאלות לפני המשך ניתוח."}));
         return;
       }
     }
 
-    setIsRecipeLoading(true);
-    setRecipeError("");
-    setRecipeNotes("");
+    setRecipe(p => ({...p, loading: true, error: "", notes: ""}));
 
     const applyParsedRecipeResult = (parsed: RecipeAiResponse) => {
       if (
@@ -1791,9 +1721,7 @@ const saveUserProfileSettings = async () => {
         if (normalizedQuestions.length === 0) {
           return false;
         }
-        setRecipeQuestions(normalizedQuestions);
-        setRecipeItems([]);
-        setRecipeNotes("");
+        setRecipe(p => ({...p, questions: normalizedQuestions, items: [], notes: ""}));
         return true;
       }
 
@@ -1808,9 +1736,7 @@ const saveUserProfileSettings = async () => {
         return false;
       }
 
-      setRecipeQuestions([]);
-      setRecipeNotes(parsed.source === "fallback" ? parsed.notes || "בוצע ניתוח חלופי." : parsed.notes || "");
-      setRecipeItems(mapped);
+      setRecipe(p => ({...p, questions: [], notes: parsed.source === "fallback" ? parsed.notes || "בוצע ניתוח חלופי." : parsed.notes || "", items: mapped}));
       return true;
     };
 
@@ -1818,42 +1744,38 @@ const saveUserProfileSettings = async () => {
       const client = supabase;
       if (!client) {
         runRecipeFallback();
-        setIsRecipeLoading(false);
+        setRecipe(p => ({...p, loading: false}));
         return;
       }
       const { data, error } = await client.functions.invoke("ai-recipe", {
-        body: { recipeText, answers: recipeAnswers },
+        body: { recipeText: recipe.text, answers: recipe.answers },
       });
       if (error || !data) {
         runRecipeFallback();
-        setRecipeError("לא הצלחתי לנתח את המתכון כרגע.");
-        setIsRecipeLoading(false);
+        setRecipe(p => ({...p, error: "לא הצלחתי לנתח את המתכון כרגע.", loading: false}));
         return;
       }
       const parsed = data as RecipeAiResponse;
       const successFromApi = applyParsedRecipeResult(parsed);
       if (!successFromApi) {
         runRecipeFallback();
-        setRecipeError("לא התקבלו רכיבים מספקים, עברתי למצב חלופי.");
+        setRecipe(p => ({...p, error: "לא התקבלו רכיבים מספקים, עברתי למצב חלופי."}));
       }
     } catch {
       runRecipeFallback();
-      setRecipeError("ניתוח ענן נכשל, עברתי למצב חכם חלופי.");
+      setRecipe(p => ({...p, error: "ניתוח ענן נכשל, עברתי למצב חכם חלופי."}));
     } finally {
-      setIsRecipeLoading(false);
+      setRecipe(p => ({...p, loading: false}));
     }
-  }, [recipeText, recipeQuestions, recipeAnswers, runRecipeFallback]);
+  }, [recipe.text, recipe.questions, recipe.answers, runRecipeFallback]);
 
   const handleRunRecipe = useCallback(() => { void runRecipeAi(); }, [runRecipeAi]);
 
   const addRecipeItemsToSupermarket = useCallback(() => {
-    addBatchItems("supermarketShopping", recipeItems, "נוספו פריטי מתכון");
-    setRecipeItems([]);
-    setRecipeQuestions([]);
-    setRecipeAnswers({});
-    setRecipeText("");
+    addBatchItems("supermarketShopping", recipe.items, "נוספו פריטי מתכון");
+    setRecipe(p => ({...p, items: [], questions: [], answers: {}, text: ""}));
     setIsRecipeModalOpen(false);
-  }, [recipeItems, addBatchItems]);
+  }, [recipe.items, addBatchItems]);
 
 
   const applyActiveHouse = useCallback((house: CloudHouseRow) => {
@@ -1984,9 +1906,10 @@ const saveUserProfileSettings = async () => {
     const requestId = ++housesLoadRequestRef.current;
     if (!silent) setIsHouseLoading(true);
 
+    // Single JOIN query — replaces two sequential round-trips.
     const { data: membershipData, error: membershipError } = await client
       .from("house_members")
-      .select("house_id,user_id,role")
+      .select("house_id, role, houses!house_members_house_id_fkey(id,name,pin,sections,invite_phone,house_image,owner_user_id,updated_at)")
       .eq("user_id", userId);
 
     if (requestId !== housesLoadRequestRef.current) return;
@@ -2004,24 +1927,29 @@ const saveUserProfileSettings = async () => {
       return;
     }
 
-    const houseIds = Array.from(new Set(membershipData.map((member) => member.house_id)));
-    const { data: housesData, error: housesError } = await client
-      .from("houses")
-      .select("id,name,pin,sections,invite_phone,house_image,owner_user_id,updated_at")
-      .in("id", houseIds)
-      .order("updated_at", { ascending: false });
+    // Extract, deduplicate, and sort houses from the JOIN result.
+    const seen = new Set<string>();
+    const houses: CloudHouseRow[] = membershipData
+      .map((m) => {
+        const raw = (m as unknown as { houses: unknown }).houses;
+        return (Array.isArray(raw) ? raw[0] : raw) as CloudHouseRow | null;
+      })
+      .filter((h): h is CloudHouseRow => {
+        if (!h?.id || seen.has(h.id)) return false;
+        seen.add(h.id);
+        return true;
+      })
+      .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 
     if (requestId !== housesLoadRequestRef.current) return;
 
-    if (housesError || !housesData) {
+    if (houses.length === 0) {
       if (!silent) {
-        setHouseListError("לא הצלחתי לטעון את הבתים שלך.");
+        setHouseForm(p => ({...p, error: "לא הצלחתי לטעון את הבתים שלך."}));
         setIsHouseLoading(false);
       }
       return;
     }
-
-    const houses = housesData as CloudHouseRow[];
     setMemberHouses(houses);
     const selectedHouseKey = getSelectedHouseStorageKey(userId);
     const selectedHouseFromStorage =
@@ -2283,83 +2211,72 @@ const saveUserProfileSettings = async () => {
     const client = supabase;
     if (!client) return;
 
-    const identifier = forgotPasswordIdentifier.trim().toLowerCase();
+    const identifier = forgotPwd.identifier.trim().toLowerCase();
     if (!identifier) {
-      setForgotPasswordError("יש להזין אימייל.");
+      setForgotPwd(p => ({...p, error: "יש להזין אימייל."}));
       return;
     }
     if (!identifier.includes("@") || !isValidEmail(identifier)) {
-      setForgotPasswordError("לאיפוס סיסמה חייבים להזין אימייל תקין.");
+      setForgotPwd(p => ({...p, error: "לאיפוס סיסמה חייבים להזין אימייל תקין."}));
       return;
     }
 
-    setIsForgotPasswordLoading(true);
-    setForgotPasswordError("");
-    setForgotPasswordFeedback("");
+    setForgotPwd(p => ({...p, loading: true, error: "", feedback: ""}));
 
     const redirectTo = homeLink || getPublicAppOrigin();
     const { error } = await client.auth.resetPasswordForEmail(identifier, { redirectTo });
 
     if (error) {
-      setForgotPasswordError("לא הצלחתי לשלוח קישור איפוס כרגע.");
-      setIsForgotPasswordLoading(false);
+      setForgotPwd(p => ({...p, error: "לא הצלחתי לשלוח קישור איפוס כרגע.", loading: false}));
       return;
     }
 
-    setForgotPasswordFeedback("אם המשתמש קיים, נשלח קישור איפוס סיסמה לאימייל.");
-    setIsForgotPasswordLoading(false);
+    setForgotPwd(p => ({...p, feedback: "אם המשתמש קיים, נשלח קישור איפוס סיסמה לאימייל.", loading: false}));
   };
 
   const handleRecoveryPasswordUpdate = async () => {
     const client = supabase;
     if (!client) return;
 
-    const password = recoveryPasswordInput.trim();
-    const confirm = recoveryPasswordConfirmInput.trim();
+    const password = recoveryPwd.input.trim();
+    const confirm = recoveryPwd.confirm.trim();
 
     if (password.length < 6) {
-      setRecoveryPasswordError("סיסמה חדשה חייבת להכיל לפחות 6 תווים.");
+      setRecoveryPwd(p => ({...p, error: "סיסמה חדשה חייבת להכיל לפחות 6 תווים."}));
       return;
     }
     if (password !== confirm) {
-      setRecoveryPasswordError("אימות הסיסמה לא תואם.");
+      setRecoveryPwd(p => ({...p, error: "אימות הסיסמה לא תואם."}));
       return;
     }
 
-    setIsRecoveryPasswordLoading(true);
-    setRecoveryPasswordError("");
-    setRecoveryPasswordFeedback("");
+    setRecoveryPwd(p => ({...p, loading: true, error: "", feedback: ""}));
 
     const { error } = await client.auth.updateUser({ password });
     if (error) {
-      setRecoveryPasswordError("לא הצלחתי לעדכן סיסמה. נסה שוב.");
-      setIsRecoveryPasswordLoading(false);
+      setRecoveryPwd(p => ({...p, error: "לא הצלחתי לעדכן סיסמה. נסה שוב.", loading: false}));
       return;
     }
 
     await client.auth.signOut();
-    setRecoveryPasswordFeedback("הסיסמה עודכנה בהצלחה. אפשר להתחבר עם הסיסמה החדשה.");
+    setRecoveryPwd(p => ({...p, feedback: "הסיסמה עודכנה בהצלחה. אפשר להתחבר עם הסיסמה החדשה.", loading: false, input: "", confirm: ""}));
     setIsRecoveryMode(false);
-    setRecoveryPasswordInput("");
-    setRecoveryPasswordConfirmInput("");
     if (window.location.hash) {
       window.history.replaceState({}, "", window.location.pathname + window.location.search);
     }
-    setIsRecoveryPasswordLoading(false);
   };
 
   const handleCreateHouse = async () => {
     const client = supabase;
     if (!client || !activeUser) return;
 
-    const houseName = houseCreateNameInput.trim();
+    const houseName = houseForm.createName.trim();
     if (houseName.length < 2) {
-      setHouseListError("שם בית חייב להכיל לפחות 2 תווים.");
+      setHouseForm(p => ({...p, error: "שם בית חייב להכיל לפחות 2 תווים."}));
       return;
     }
 
-    setHouseCreateLoading(true);
-    setHouseListError("");
+    setHouseForm(p => ({...p, createLoading: true, error: ""}));
 
     const houseId = Math.random().toString(36).slice(2, 8).toUpperCase();
     const sectionsData = getDefaultSectionItems();
@@ -2375,8 +2292,7 @@ const saveUserProfileSettings = async () => {
     });
 
     if (houseError) {
-      setHouseListError("יצירת בית נכשלה. נסה שוב.");
-      setHouseCreateLoading(false);
+      setHouseForm(p => ({...p, error: "יצירת בית נכשלה. נסה שוב.", createLoading: false}));
       return;
     }
 
@@ -2391,23 +2307,21 @@ const saveUserProfileSettings = async () => {
       },
     );
 
-    setHouseCreateNameInput("");
-    setHouseCreateLoading(false);
+    setHouseForm(p => ({...p, createName: "", createLoading: false}));
     await loadUserHouses(activeUser.id, houseId);
   };
 
   const handleJoinHouseByToken = async (overrideCode?: string, fallbackHouseCode?: string) => {
     const client = supabase;
     if (!client || !activeUser) return false;
-    const rawCode = (overrideCode ?? joinTokenInput).trim().toUpperCase();
+    const rawCode = (overrideCode ?? houseForm.joinToken).trim().toUpperCase();
     const normalizedFallbackHouseCode = fallbackHouseCode?.trim().toUpperCase() || "";
     if (!rawCode && !normalizedFallbackHouseCode) {
-      setHouseListError("יש להזין קוד הזמנה.");
+      setHouseForm(p => ({...p, error: "יש להזין קוד הזמנה."}));
       return false;
     }
 
-    setJoinLoading(true);
-    setHouseListError("");
+    setHouseForm(p => ({...p, joinLoading: true, error: ""}));
 
     const { data, error } = await client.rpc("join_house_by_token", {
       p_token: rawCode,
@@ -2415,22 +2329,19 @@ const saveUserProfileSettings = async () => {
     });
 
     if (error || !data) {
-      setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
-      setJoinLoading(false);
+      setHouseForm(p => ({...p, error: "קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.", joinLoading: false}));
       return false;
     }
 
     const result = data as { house_id?: string; error?: string; already_member?: boolean };
 
     if (result.error) {
-      setHouseListError("קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.");
-      setJoinLoading(false);
+      setHouseForm(p => ({...p, error: "קוד ההזמנה לא תקין או שלא ניתן להצטרף כרגע.", joinLoading: false}));
       return false;
     }
 
     const targetHouseId = result.house_id ?? "";
-    setJoinTokenInput("");
-    setJoinLoading(false);
+    setHouseForm(p => ({...p, joinToken: "", joinLoading: false}));
     if (window.location.search.includes("invite=") || window.location.search.includes("house=")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -2532,9 +2443,8 @@ const saveUserProfileSettings = async () => {
     const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
 
-    setInviteFeedback("");
+    setInviteForm({ identifier: "", feedback: "", loading: false });
     setInviteToken("");
-    setInviteByUserLoading(false);
     setIsInviteModalOpen(true);
     const { data: existingInvite } = await client
       .from("house_invites")
@@ -2564,7 +2474,7 @@ const saveUserProfileSettings = async () => {
     }
 
     if (!createdToken) {
-      setInviteFeedback("לא הצלחתי ליצור קישור הזמנה.");
+      setInviteForm(p => ({...p, feedback: "לא הצלחתי ליצור קישור הזמנה."}));
       return;
     }
     setInviteToken(createdToken);
@@ -2599,9 +2509,9 @@ const saveUserProfileSettings = async () => {
     void hapticLight();
     try {
       await nativeShare({ title: "Homly", text: inviteMessage, url: inviteLink });
-      setInviteFeedback("הלינק שותף בהצלחה.");
+      setInviteForm(p => ({...p, feedback: "הלינק שותף בהצלחה."}));
     } catch {
-      setInviteFeedback("לא הצלחתי לשתף כרגע.");
+      setInviteForm(p => ({...p, feedback: "לא הצלחתי לשתף כרגע."}));
     }
   }, [inviteLink, inviteMessage]);
 
@@ -2609,9 +2519,9 @@ const saveUserProfileSettings = async () => {
     if (!inviteLink) return;
     try {
       await navigator.clipboard.writeText(inviteLink);
-      setInviteFeedback("הלינק הועתק ללוח.");
+      setInviteForm(p => ({...p, feedback: "הלינק הועתק ללוח."}));
     } catch {
-      setInviteFeedback("לא הצלחתי להעתיק את הלינק.");
+      setInviteForm(p => ({...p, feedback: "לא הצלחתי להעתיק את הלינק."}));
     }
   }, [inviteLink]);
 
@@ -2665,25 +2575,22 @@ const saveUserProfileSettings = async () => {
     const activeHouse = activeHouseRef.current;
     const activeUser = activeUserRef.current;
     if (!client || !activeHouse || !activeUser) return;
-    const identifier = inviteIdentifierInput.trim();
+    const identifier = inviteForm.identifier.trim();
     if (!identifier) {
-      setInviteFeedback("יש להזין שם משתמש או אימייל.");
+      setInviteForm(p => ({...p, feedback: "יש להזין שם משתמש או אימייל."}));
       return;
     }
 
-    setInviteByUserLoading(true);
-    setInviteFeedback("");
+    setInviteForm(p => ({...p, loading: true, feedback: ""}));
 
     const targetUser = await resolveInviteUserByIdentifier(identifier);
     if (!targetUser) {
-      setInviteFeedback("לא נמצא משתמש עם שם המשתמש/האימייל שהוזן.");
-      setInviteByUserLoading(false);
+      setInviteForm(p => ({...p, feedback: "לא נמצא משתמש עם שם המשתמש/האימייל שהוזן.", loading: false}));
       return;
     }
 
     if (targetUser.id === activeUser.id) {
-      setInviteFeedback("אי אפשר להזמין את עצמך לבית.");
-      setInviteByUserLoading(false);
+      setInviteForm(p => ({...p, feedback: "אי אפשר להזמין את עצמך לבית.", loading: false}));
       return;
     }
 
@@ -2695,8 +2602,7 @@ const saveUserProfileSettings = async () => {
       .maybeSingle();
 
     if (existingMembership) {
-      setInviteFeedback("המשתמש כבר נמצא בבית הזה.");
-      setInviteByUserLoading(false);
+      setInviteForm(p => ({...p, feedback: "המשתמש כבר נמצא בבית הזה.", loading: false}));
       return;
     }
 
@@ -2707,15 +2613,12 @@ const saveUserProfileSettings = async () => {
     });
 
     if (error) {
-      setInviteFeedback("לא הצלחתי לשלוח הזמנה כרגע.");
-      setInviteByUserLoading(false);
+      setInviteForm(p => ({...p, feedback: "לא הצלחתי לשלוח הזמנה כרגע.", loading: false}));
       return;
     }
 
-    setInviteIdentifierInput("");
-    setInviteFeedback(`${targetUser.display_name} נוסף לבית בהצלחה.`);
-    setInviteByUserLoading(false);
-  }, [inviteIdentifierInput]);
+    setInviteForm(p => ({...p, identifier: "", feedback: `${targetUser.display_name} נוסף לבית בהצלחה.`, loading: false}));
+  }, [inviteForm.identifier]);
 
   if (!isSupabaseConfigured) {
     return (
@@ -2754,20 +2657,20 @@ const saveUserProfileSettings = async () => {
         userPasswordInput={userPasswordInput}
         displayNameInput={displayNameInput}
         userAvatarInput={userAvatarInput}
-        isProcessingImage={isProcessingImage}
+        isProcessingImage={profileForm.processingImage}
         authError={authError}
         authLoading={authLoading}
         isForgotPasswordOpen={isForgotPasswordOpen}
-        forgotPasswordIdentifier={forgotPasswordIdentifier}
-        forgotPasswordError={forgotPasswordError}
-        forgotPasswordFeedback={forgotPasswordFeedback}
-        isForgotPasswordLoading={isForgotPasswordLoading}
+        forgotPasswordIdentifier={forgotPwd.identifier}
+        forgotPasswordError={forgotPwd.error}
+        forgotPasswordFeedback={forgotPwd.feedback}
+        isForgotPasswordLoading={forgotPwd.loading}
         isRecoveryMode={isRecoveryMode}
-        recoveryPasswordInput={recoveryPasswordInput}
-        recoveryPasswordConfirmInput={recoveryPasswordConfirmInput}
-        recoveryPasswordError={recoveryPasswordError}
-        recoveryPasswordFeedback={recoveryPasswordFeedback}
-        isRecoveryPasswordLoading={isRecoveryPasswordLoading}
+        recoveryPasswordInput={recoveryPwd.input}
+        recoveryPasswordConfirmInput={recoveryPwd.confirm}
+        recoveryPasswordError={recoveryPwd.error}
+        recoveryPasswordFeedback={recoveryPwd.feedback}
+        isRecoveryPasswordLoading={recoveryPwd.loading}
         setAuthMode={setAuthMode}
         setAuthError={setAuthError}
         setUsernameInput={setUsernameInput}
@@ -2776,11 +2679,11 @@ const saveUserProfileSettings = async () => {
         setDisplayNameInput={setDisplayNameInput}
         setUserAvatarInput={setUserAvatarInput}
         setIsForgotPasswordOpen={setIsForgotPasswordOpen}
-        setForgotPasswordIdentifier={setForgotPasswordIdentifier}
-        setForgotPasswordError={setForgotPasswordError}
-        setForgotPasswordFeedback={setForgotPasswordFeedback}
-        setRecoveryPasswordInput={setRecoveryPasswordInput}
-        setRecoveryPasswordConfirmInput={setRecoveryPasswordConfirmInput}
+        setForgotPasswordIdentifier={(x) => setForgotPwd(p => ({...p, identifier: x}))}
+        setForgotPasswordError={(x) => setForgotPwd(p => ({...p, error: x}))}
+        setForgotPasswordFeedback={(x) => setForgotPwd(p => ({...p, feedback: x}))}
+        setRecoveryPasswordInput={(x) => setRecoveryPwd(p => ({...p, input: x}))}
+        setRecoveryPasswordConfirmInput={(x) => setRecoveryPwd(p => ({...p, confirm: x}))}
         handleCreateUser={handleCreateUser}
         handleLoginUser={handleLoginUser}
         handleForgotPassword={handleForgotPassword}
@@ -2800,17 +2703,17 @@ const saveUserProfileSettings = async () => {
     return (
       <HouseSelectorScreen
         activeUser={activeUser}
-        houseCreateNameInput={houseCreateNameInput}
-        setHouseCreateNameInput={setHouseCreateNameInput}
+        houseCreateNameInput={houseForm.createName}
+        setHouseCreateNameInput={(x) => setHouseForm(p => ({...p, createName: x}))}
         handleCreateHouse={handleCreateHouse}
-        houseCreateLoading={houseCreateLoading}
-        joinTokenInput={joinTokenInput}
-        setJoinTokenInput={setJoinTokenInput}
+        houseCreateLoading={houseForm.createLoading}
+        joinTokenInput={houseForm.joinToken}
+        setJoinTokenInput={(x) => setHouseForm(p => ({...p, joinToken: x}))}
         handleJoinHouseByToken={handleJoinHouseByToken}
-        joinLoading={joinLoading}
+        joinLoading={houseForm.joinLoading}
         memberHouses={memberHouses}
         applyActiveHouse={applyActiveHouse}
-        houseListError={houseListError}
+        houseListError={houseForm.error}
       />
     );
   }
@@ -2913,16 +2816,16 @@ const saveUserProfileSettings = async () => {
 
           {isRecipeModalOpen && (
             <Suspense fallback={null}><RecipeModal
-              recipeText={recipeText}
-              onRecipeTextChange={setRecipeText}
-              recipeQuestions={recipeQuestions}
-              recipeAnswers={recipeAnswers}
+              recipeText={recipe.text}
+              onRecipeTextChange={(x) => setRecipe(p => ({...p, text: x}))}
+              recipeQuestions={recipe.questions}
+              recipeAnswers={recipe.answers}
               onRecipeAnswerChange={handleRecipeAnswerChange}
-              recipeItems={recipeItems}
-              recipeNotes={recipeNotes}
-              recipeError={recipeError}
-              isRecipeLoading={isRecipeLoading}
-              recipeRecording={recipeRecording}
+              recipeItems={recipe.items}
+              recipeNotes={recipe.notes}
+              recipeError={recipe.error}
+              isRecipeLoading={recipe.loading}
+              recipeRecording={recipe.recording}
               onToggleRecording={toggleRecipeRecording}
               onRunRecipe={handleRunRecipe}
               onAddToSupermarket={addRecipeItemsToSupermarket}
@@ -2934,14 +2837,14 @@ const saveUserProfileSettings = async () => {
             <Suspense fallback={null}><InviteModal
               invitePhone={invitePhone}
               onInvitePhoneChange={setInvitePhone}
-              inviteIdentifierInput={inviteIdentifierInput}
-              onInviteIdentifierChange={setInviteIdentifierInput}
-              inviteByUserLoading={inviteByUserLoading}
+              inviteIdentifierInput={inviteForm.identifier}
+              onInviteIdentifierChange={(x) => setInviteForm(p => ({...p, identifier: x}))}
+              inviteByUserLoading={inviteForm.loading}
               inviteToken={inviteToken}
               inviteLink={inviteLink}
               normalizedPhone={normalizedPhone}
               smsHref={smsHref}
-              inviteFeedback={inviteFeedback}
+              inviteFeedback={inviteForm.feedback}
               houseId={activeHouse?.id}
               onInviteMember={inviteMemberByIdentifier}
               onShareLink={shareInviteLink}
@@ -2965,12 +2868,12 @@ const saveUserProfileSettings = async () => {
       {isUserProfileOpen && activeUser && (
         <UserProfileModal
           activeUser={activeUser}
-          userProfileImage={userProfileImage}
-          userProfileName={userProfileName}
-          setUserProfileName={setUserProfileName}
-          userProfileError={userProfileError}
-          isSavingUserProfile={isSavingUserProfile}
-          isProcessingImage={isProcessingImage}
+          userProfileImage={profileForm.image}
+          userProfileName={profileForm.name}
+          setUserProfileName={(x) => setProfileForm(p => ({...p, name: x}))}
+          userProfileError={profileForm.error}
+          isSavingUserProfile={profileForm.saving}
+          isProcessingImage={profileForm.processingImage}
           saveUserProfileSettings={saveUserProfileSettings}
           openUserProfileImagePicker={openUserProfileImagePicker}
           handleUserProfileImageFile={handleUserProfileImageFile}
@@ -2981,13 +2884,13 @@ const saveUserProfileSettings = async () => {
 
       {isSettingsOpen && (
         <Suspense fallback={null}><SettingsModal
-          settingsHouseName={settingsHouseName}
-          onSettingsHouseNameChange={setSettingsHouseName}
-          settingsHouseImage={settingsHouseImage}
+          settingsHouseName={settingsForm.houseName}
+          onSettingsHouseNameChange={(x) => setSettingsForm(p => ({...p, houseName: x}))}
+          settingsHouseImage={settingsForm.houseImage}
           onSettingsImageFile={handleSettingsImageFile}
-          isSavingSettings={isSavingSettings}
-          isDeletingHouse={isDeletingHouse}
-          settingsError={settingsError}
+          isSavingSettings={settingsForm.saving}
+          isDeletingHouse={settingsForm.deleting}
+          settingsError={settingsForm.error}
           isOwner={activeHouse?.owner_user_id === activeUser?.id}
           onSave={handleSaveHouseSettings}
           onDelete={handleDeleteHouse}

@@ -1,22 +1,20 @@
 "use client";
 
-import * as Sentry from "@sentry/nextjs";
+type SentryModule = typeof import("@sentry/nextjs");
+let sentry: SentryModule | null = null;
 
-let initialized = false;
-
-export function initMonitoring() {
-  if (initialized || typeof window === "undefined") return;
+export async function initMonitoring() {
+  if (sentry || typeof window === "undefined") return;
   const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return;
 
-  Sentry.init({
+  sentry = await import("@sentry/nextjs");
+  sentry.init({
     dsn,
     environment: process.env.NODE_ENV ?? "production",
     tracesSampleRate: 0.1,
-    // Disable session replay — not needed for this app
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
-    // Ignore common benign errors
     ignoreErrors: [
       "ResizeObserver loop limit exceeded",
       "Network request failed",
@@ -24,15 +22,14 @@ export function initMonitoring() {
       "UNIMPLEMENTED",
     ],
     beforeSend(event) {
-      // Don't send errors in development
       if (process.env.NODE_ENV === "development") return null;
       return event;
     },
   });
-  initialized = true;
 }
 
 export function captureError(error: unknown, context?: Record<string, unknown>) {
-  if (context) Sentry.setContext("extra", context);
-  Sentry.captureException(error);
+  if (!sentry) return;
+  if (context) sentry.setContext("extra", context);
+  sentry.captureException(error);
 }

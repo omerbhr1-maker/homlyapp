@@ -1,9 +1,6 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import "@fontsource/assistant/400.css";
-@import "@fontsource/assistant/600.css";
-@import "@fontsource/assistant/700.css";
 
 :root {
   --background: #eef4ff;
@@ -56,8 +53,8 @@ body {
     radial-gradient(circle at 85% 0%, #d9f7ff 0%, transparent 33%),
     linear-gradient(180deg, #f5faff 0%, var(--background) 55%, #e8efff 100%);
   color: var(--foreground);
-  /* SF Hebrew on iOS/macOS, fallback to Assistant on other platforms */
-  font-family: -apple-system, "SF Hebrew", system-ui, "Segoe UI", "Assistant", sans-serif;
+  /* SF Hebrew on iOS/macOS, system font on other platforms */
+  font-family: -apple-system, "SF Hebrew", system-ui, "Segoe UI", sans-serif;
   scroll-behavior: smooth;
 }
 

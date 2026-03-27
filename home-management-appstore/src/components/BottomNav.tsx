@@ -43,19 +43,19 @@ export const BottomNav = memo(function BottomNav({
           transition: navDragY > 0 ? "none" : undefined,
         }}
       >
-        <div className="mx-auto w-full max-w-[min(100vw-0.7rem,24.5rem)] rounded-t-[2.1rem] rounded-b-[1.45rem] border border-white/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-800/70 p-2 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur-xl">
+        <div className="mx-auto w-full max-w-[min(100vw-0.7rem,24.5rem)] rounded-t-[2.1rem] rounded-b-[1.45rem] border border-white/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-800/70 p-1.5 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur-xl">
           <div
-            className="mx-auto mb-1 h-1.5 w-20 cursor-grab rounded-full bg-slate-200/65 dark:bg-slate-600/65 active:cursor-grabbing"
+            className="mx-auto mb-1 h-1.5 w-16 cursor-grab rounded-full bg-slate-200/65 dark:bg-slate-600/65 active:cursor-grabbing"
             onTouchStart={handleNavDragStart}
             onTouchMove={handleNavDragMove}
             onTouchEnd={handleNavDragEnd}
           />
-          <div className="flex items-center justify-between rounded-[1.8rem] border border-white/60 dark:border-slate-700/60 bg-white/45 dark:bg-slate-800/45 px-1 py-1.5">
+          <div className="flex items-center justify-between rounded-[1.8rem] border border-white/60 dark:border-slate-700/60 bg-white/45 dark:bg-slate-800/45 px-1 py-1">
             <a
               href="#tasks"
-              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
+              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
             >
-              <span className="mb-1 flex h-10 w-10 items-center justify-center rounded-full border border-sky-100 dark:border-sky-900 bg-sky-50 dark:bg-blue-900/30 text-sky-600 shadow-sm">
+              <span className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full border border-sky-100 dark:border-sky-900 bg-sky-50 dark:bg-blue-900/30 text-sky-600 shadow-sm">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 11l3 3L22 4" />
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
@@ -65,9 +65,9 @@ export const BottomNav = memo(function BottomNav({
             </a>
             <a
               href="#general"
-              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
+              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
             >
-              <span className="mb-1 flex h-10 w-10 items-center justify-center rounded-full border border-teal-100 dark:border-teal-900 bg-teal-50 dark:bg-teal-900/40 text-teal-600 dark:text-teal-400 shadow-sm">
+              <span className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full border border-teal-100 dark:border-teal-900 bg-teal-50 dark:bg-teal-900/40 text-teal-600 dark:text-teal-400 shadow-sm">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M6 7h12" />
                   <path d="M8 7V5a4 4 0 0 1 8 0v2" />
@@ -78,9 +78,9 @@ export const BottomNav = memo(function BottomNav({
             </a>
             <a
               href="#supermarket"
-              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
+              className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-2xl py-1 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition active:scale-95"
             >
-              <span className="mb-1 flex h-10 w-10 items-center justify-center rounded-full border border-violet-100 dark:border-violet-900 bg-violet-50 dark:bg-violet-900/30 text-violet-600 shadow-sm">
+              <span className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full border border-violet-100 dark:border-violet-900 bg-violet-50 dark:bg-violet-900/30 text-violet-600 shadow-sm">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="9" cy="20" r="1" />
                   <circle cx="20" cy="20" r="1" />

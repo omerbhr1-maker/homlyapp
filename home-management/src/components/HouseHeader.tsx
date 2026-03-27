@@ -19,7 +19,7 @@ export const HouseHeader = memo(function HouseHeader({
   onOpenSettings,
 }: HouseHeaderProps) {
   return (
-    <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-5 rounded-3xl border border-white/70 dark:border-slate-700/70 bg-white/90 dark:bg-slate-800/90 p-4 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur sm:mb-7 sm:p-6">
+    <header className="sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-3 rounded-3xl border border-white/70 dark:border-slate-700/70 bg-white/90 dark:bg-slate-800/90 p-3 shadow-xl shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur sm:mb-4 sm:p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <HomeLogo houseName={activeHouse.name} houseImage={activeHouse.house_image} />
         <div className="flex items-center gap-2">

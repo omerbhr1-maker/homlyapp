@@ -22,7 +22,7 @@ type SectionCardProps = {
   activeUserAvatarUrl: string | undefined;
   onAddItem: (key: SectionKey, text: string) => void;
   onToggle: (key: SectionKey, id: number) => void;
-  onEdit: (key: SectionKey, id: number) => void;
+  onEdit: (key: SectionKey, id: number, newText: string) => void;
   onDelete: (key: SectionKey, id: number) => void;
   onToggleRecording: (key: SectionKey) => void;
   onOpenRecipeModal: () => void;
@@ -72,7 +72,7 @@ export const SectionCard = memo(function SectionCard({
   return (
     <article
       id={sectionAnchors[sectionKey]}
-      className={`scroll-mt-32 rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-800/90 p-3 shadow-lg shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur sm:p-4 lg:flex lg:flex-col${isCollapsed ? "" : " lg:min-h-[38rem]"}`}
+      className={`scroll-mt-20 rounded-3xl border border-white/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-800/90 p-3 shadow-lg shadow-slate-200/70 dark:shadow-slate-900/50 backdrop-blur sm:p-4 lg:flex lg:flex-col${isCollapsed ? "" : " lg:min-h-[38rem]"}`}
     >
       <button
         type="button"
@@ -207,9 +207,16 @@ export const SectionCard = memo(function SectionCard({
           </SortableContext>
 
           {visibleItems.length === 0 && (
-            <p className="rounded-2xl bg-slate-50 dark:bg-slate-900 px-3 py-4 text-center text-xs font-bold text-slate-500 dark:text-slate-400">
-              אין פריטים להצגה לפי הסינון הנוכחי.
-            </p>
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-slate-50 dark:bg-slate-900 px-3 py-6 text-center">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                  <rect x="9" y="3" width="6" height="4" rx="1" />
+                </svg>
+              </span>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400">הרשימה ריקה</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">הוסף פריט ראשון למעלה</p>
+            </div>
           )}
         </div>
       </div>

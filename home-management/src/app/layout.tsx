@@ -41,6 +41,8 @@ export const viewport: Viewport = {
   ],
 };
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -48,6 +50,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
+      <head>
+        {SUPABASE_URL && (
+          <link rel="preconnect" href={SUPABASE_URL} crossOrigin="anonymous" />
+        )}
+      </head>
       <body className="antialiased">
         <ErrorBoundary>{children}</ErrorBoundary>
         <Analytics />

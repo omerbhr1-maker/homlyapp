@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractOutputText, type OpenAIResponsesPayload } from "@/lib/openai";
 import { sanitizeItems, splitTranscriptToItems } from "@/lib/item-parsing";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 type RecipeQuestionKind = "single" | "multi" | "text";
 type RecipeAnswerValue = string | string[];
@@ -191,6 +192,17 @@ export function OPTIONS() {
 }
 
 export async function POST(request: Request) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!checkRateLimit(ip, 10)) {
+    return jsonWithCors<RecipeResponse>({
+      needs_clarification: false,
+      questions: [],
+      items: [],
+      notes: "",
+      source: "fallback",
+    }, { status: 429 });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   const body = (await request.json().catch(() => ({}))) as RecipeRequest;
   const recipeText = String(body.recipeText || "").trim();
@@ -204,6 +216,10 @@ export async function POST(request: Request) {
       notes: "",
       source: "fallback",
     });
+  }
+
+  if (recipeText.length > 20000) {
+    return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText.slice(0, 20000), answers));
   }
 
   if (!apiKey) {
@@ -232,64 +248,68 @@ export async function POST(request: Request) {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: "gpt-4.1",
-        input: prompt,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "recipe_to_shopping_list",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                needs_clarification: { type: "boolean" },
-                notes: { type: "string" },
-                questions: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      title: { type: "string" },
-                      kind: { type: "string", enum: ["single", "multi", "text"] },
-                      options: {
-                        type: "array",
-                        items: { type: "string" },
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: "gpt-4.1",
+          input: prompt,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "recipe_to_shopping_list",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  needs_clarification: { type: "boolean" },
+                  notes: { type: "string" },
+                  questions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        title: { type: "string" },
+                        kind: { type: "string", enum: ["single", "multi", "text"] },
+                        options: {
+                          type: "array",
+                          items: { type: "string" },
+                        },
                       },
+                      required: ["id", "title", "kind", "options"],
+                      additionalProperties: false,
                     },
-                    required: ["id", "title", "kind", "options"],
-                    additionalProperties: false,
                   },
-                },
-                items: {
-                  type: "array",
                   items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      amount: { type: "string" },
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        amount: { type: "string" },
+                      },
+                      required: ["name", "amount"],
+                      additionalProperties: false,
                     },
-                    required: ["name", "amount"],
-                    additionalProperties: false,
                   },
                 },
+                required: ["needs_clarification", "questions", "items", "notes"],
+                additionalProperties: false,
               },
-              required: ["needs_clarification", "questions", "items", "notes"],
-              additionalProperties: false,
             },
           },
-        },
-      }),
-    });
-    clearTimeout(timeout);
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       return jsonWithCors<RecipeResponse>(fallbackRecipe(recipeText, answers));
